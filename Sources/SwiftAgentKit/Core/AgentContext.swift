@@ -29,8 +29,10 @@ public class AgentContext {
     
     public func addMessage(_ message: Message) {
         messages.append(message)
-        // In real implementation, save asynchronously
-        // Task { try? await store.save(messages: messages) }
+        // TODO: Implement async saving without data races
+        // Task.detached { [messages = self.messages, store = self.store] in
+        //     try? await store.save(messages: messages)
+        // }
     }
     
     public func load() async throws {

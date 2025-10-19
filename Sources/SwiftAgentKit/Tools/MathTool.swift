@@ -12,8 +12,13 @@ public struct MathTool: Tool {
         guard let expression = input["expression"] as? String else {
             throw ToolError.invalidInput
         }
-        
-        // Simple evaluation - in practice, use a proper math library
+
+        // Basic validation to prevent injection
+        let allowedCharacters = CharacterSet(charactersIn: "0123456789+-*/(). ")
+        guard expression.rangeOfCharacter(from: allowedCharacters.inverted) == nil else {
+            throw ToolError.invalidInput
+        }
+
         let result = evaluateMath(expression)
         return ToolResult(content: "Result: \(result)", data: ["result": result])
     }
@@ -23,8 +28,4 @@ public struct MathTool: Tool {
         let expr = NSExpression(format: expression)
         return expr.expressionValue(with: nil, context: nil) as? Double ?? 0.0
     }
-}
-
-enum ToolError: Error {
-    case invalidInput
 }

@@ -1,4 +1,5 @@
 import Foundation
+import AnyCodable
 
 public struct OpenAIProvider: LanguageModelProvider {
     private let apiKey: String
@@ -22,8 +23,8 @@ public struct OpenAIProvider: LanguageModelProvider {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let openAIMessages = messages.map { $0.toOpenAI() }
-        let openAITools = tools?.map { $0.toOpenAI() }
+        let openAIMessages = messages.map(Message.toOpenAI)
+        let openAITools = tools?.map(ToolDescriptor.toOpenAI)
 
         let requestBody = OpenAIRequest(
             model: model,
@@ -39,11 +40,11 @@ public struct OpenAIProvider: LanguageModelProvider {
         let response = try JSONDecoder().decode(OpenAIResponse.self, from: data)
 
         guard let choice = response.choices.first else {
-            throw NSError(domain: "OpenAIProvider", code: 1, userInfo: [NSLocalizedDescriptionKey: "No response choices"])
+            throw OpenAIError.noResponseChoices
         }
 
         let content = choice.message.content ?? ""
-        let toolCalls = choice.message.tool_calls?.map { $0.toToolCall() }
+        let toolCalls = try choice.message.tool_calls?.map { try $0.toToolCall() }
 
         return LLMResponse(content: content, toolCalls: toolCalls)
     }
@@ -136,51 +137,12 @@ private struct OpenAIRequest: Codable {
     }
 }
 
-// Helper for Any
-private struct AnyCodable: Codable {
-    let value: Any
 
-    init(_ value: Any) {
-        self.value = value
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let int = try? container.decode(Int.self) {
-            value = int
-        } else if let double = try? container.decode(Double.self) {
-            value = double
-        } else if let string = try? container.decode(String.self) {
-            value = string
-        } else if let bool = try? container.decode(Bool.self) {
-            value = bool
-        } else if let array = try? container.decode([AnyCodable].self) {
-            value = array.map { $0.value }
-        } else if let dict = try? container.decode([String: AnyCodable].self) {
-            value = dict.mapValues { $0.value }
-        } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported type")
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch value {
-        case let int as Int: try container.encode(int)
-        case let double as Double: try container.encode(double)
-        case let string as String: try container.encode(string)
-        case let bool as Bool: try container.encode(bool)
-        case let array as [Any]: try container.encode(array.map { AnyCodable($0) })
-        case let dict as [String: Any]: try container.encode(dict.mapValues { AnyCodable($0) })
-        default: throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: container.codingPath, debugDescription: "Unsupported type"))
-        }
-    }
-}
 
 // Extensions
 private extension Message {
-    func toOpenAI() -> OpenAIMessage {
-        switch self {
+    static func toOpenAI(_ message: Message) -> OpenAIMessage {
+        switch message {
         case .system(let content):
             return OpenAIMessage(role: "system", content: content)
         case .user(let content):
@@ -194,18 +156,18 @@ private extension Message {
 }
 
 private extension ToolDescriptor {
-    func toOpenAI() -> OpenAITool {
+    static func toOpenAI(_ descriptor: ToolDescriptor) -> OpenAITool {
         return OpenAITool(function: OpenAIFunction(
-            name: name,
-            description: description,
-            parameters: inputSchema.toOpenAI()
+            name: descriptor.name,
+            description: descriptor.description,
+            parameters: JSONSchema.toOpenAI(descriptor.inputSchema)
         ))
     }
 }
 
 private extension JSONSchema {
-    func toOpenAI() -> AnyCodable {
-        switch self {
+    static func toOpenAI(_ schema: JSONSchema) -> AnyCodable {
+        switch schema {
         case .string(let description):
             return AnyCodable(["type": "string", "description": description as Any])
         case .number(let description):
@@ -215,13 +177,13 @@ private extension JSONSchema {
         case .object(let properties):
             return AnyCodable([
                 "type": "object",
-                "properties": properties.mapValues { $0.toOpenAI().value },
+                "properties": properties.mapValues { JSONSchema.toOpenAI($0).value },
                 "required": Array(properties.keys)
             ])
         case .array(let itemSchema, let description):
             return AnyCodable([
                 "type": "array",
-                "items": itemSchema.toOpenAI().value,
+                "items": JSONSchema.toOpenAI(itemSchema).value,
                 "description": description as Any
             ])
         }
@@ -229,10 +191,11 @@ private extension JSONSchema {
 }
 
 private extension OpenAIToolCall {
-    func toToolCall() -> ToolCall {
-        return ToolCall(
-            name: function.name,
-            arguments: (try? JSONSerialization.jsonObject(with: function.arguments.data(using: .utf8)!)) as? [String: Any] ?? [:]
-        )
+    func toToolCall() throws -> ToolCall {
+        guard let data = function.arguments.data(using: .utf8) else {
+            throw OpenAIError.invalidArgumentsEncoding
+        }
+        let arguments = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return ToolCall(name: function.name, arguments: arguments)
     }
 }

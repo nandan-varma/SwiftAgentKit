@@ -27,9 +27,17 @@ let agent = Agent(
 let result = try await agent.respond(to: "What's 5 times 7?")
 print(result.content)
 
+// Using Anthropic
+let anthropicProvider = AnthropicProvider(apiKey: "your-anthropic-key")
+let agent2 = Agent(
+    provider: anthropicProvider,
+    tools: [WeatherTool(), MathTool()],
+    instructions: "You are a helpful assistant."
+)
+
 // Using Foundation Models (macOS 15+)
 let foundationProvider = try FoundationProvider()
-let agent2 = Agent(
+let agent3 = Agent(
     provider: foundationProvider,
     tools: [WeatherTool(), MathTool()],
     instructions: "You are a helpful assistant."
@@ -39,7 +47,7 @@ let agent2 = Agent(
 ## Features
 
 - **Agent Loop**: Automatic tool selection and execution
-- **Multiple Providers**: OpenAI, Foundation Models, Anthropic, etc.
+- **Multiple Providers**: OpenAI, Anthropic, Foundation Models, etc.
 - **Tool Integration**: Extensible tool system with structured I/O
 - **Streaming**: Real-time text generation
 - **Context Management**: Persistent conversation memory
@@ -58,7 +66,8 @@ Protocol for agent tools.
 
 ## Requirements
 
-- iOS 15+/macOS 12+
+- macOS 15+/iOS 18+
 - Swift 6.0+
 - OpenAI API key (for OpenAI provider)
+- Anthropic API key (for Anthropic provider)
 - Apple Intelligence enabled (for Foundation Models, optional)

@@ -7,13 +7,13 @@ public protocol ContextStore {
 
 public class InMemoryStore: ContextStore {
     private var messages: [Message] = []
-    
+
     public init() {}
-    
+
     public func save(messages: [Message]) async throws {
         self.messages = messages
     }
-    
+
     public func load() async throws -> [Message] {
         return messages
     }

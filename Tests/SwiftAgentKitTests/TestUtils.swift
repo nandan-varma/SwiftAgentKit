@@ -33,10 +33,10 @@ struct TestUtils {
         return .object(
             description: "Test object",
             properties: [
-                "name": .string(description: "A name"),
+                "example": .string(description: "An example"),
                 "value": .integer(description: "A value")
             ],
-            required: ["name"]
+            required: ["example"]
         )
     }
 

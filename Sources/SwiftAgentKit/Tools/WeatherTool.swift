@@ -23,10 +23,10 @@ public struct WeatherTool: Tool {
     )
     
     public func execute(input: [String: Any]) async throws -> ToolResult {
-        guard let location = input["location"] as? String else {
+        guard let location = input["location"] as? String, !location.isEmpty else {
             throw ToolError.invalidInput
         }
-        
+
         // Mock weather API call - replace with real API
         let weather = "Sunny, 72°F"
         return ToolResult(content: "Weather in \(location): \(weather)", data: ["weather": weather], structuredOutput: ["weather": weather])

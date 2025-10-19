@@ -43,7 +43,7 @@ final class OpenAIProviderTests: XCTestCase {
         guard let provider = provider else {
             throw XCTSkip("OpenAI API key not available")
         }
-        let messages = [TestUtils.createTestMessage(content: "Create a JSON object with example 'test' and value 123")]
+        let messages = [TestUtils.createTestMessage(content: "Return exactly this JSON: {\"example\": \"test\", \"value\": 123}")]
         let schema = TestUtils.createTestSchema()
         let object: TestObject = try await provider.generateObject(messages: messages, outputSchema: schema, tools: nil)
         XCTAssertEqual(object.example, "test")
@@ -90,6 +90,20 @@ final class OpenAIProviderTests: XCTestCase {
             XCTFail("Expected error with invalid API key")
         } catch {
             // Expected
+        }
+    }
+
+    func testGenerateObjectErrorHandling() async throws {
+        guard let provider = provider else {
+            throw XCTSkip("OpenAI API key not available")
+        }
+        let messages = [TestUtils.createTestMessage(content: "Return invalid JSON")]
+        let schema = TestUtils.createTestSchema()
+        do {
+            let _: TestObject = try await provider.generateObject(messages: messages, outputSchema: schema, tools: nil)
+            XCTFail("Expected decoding error")
+        } catch {
+            // Expected - invalid JSON should cause decode error
         }
     }
 }

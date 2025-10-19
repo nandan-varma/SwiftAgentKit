@@ -33,7 +33,10 @@ public struct FoundationProvider: LanguageModelProvider {
         // Mock: Generate a sample object based on schema
         // For simplicity, return a hardcoded object; in real implementation, use schema to guide generation
         let mockJSON = "{\"example\": \"data\", \"value\": 42}"
-        return try JSONDecoder().decode(T.self, from: mockJSON.data(using: .utf8)!)
+        guard let data = mockJSON.data(using: .utf8) else {
+            throw ToolError.invalidInput
+        }
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     public func streamObject<T: Decodable>(

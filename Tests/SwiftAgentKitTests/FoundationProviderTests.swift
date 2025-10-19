@@ -59,4 +59,13 @@ final class FoundationProviderTests: XCTestCase {
         // Currently stubbed, so should be empty
         XCTAssertTrue(objects.isEmpty)
     }
+
+    func testFoundationProviderToolCalls() async throws {
+        let messages = [TestUtils.createTestMessage(content: "Calculate 2 + 2")]
+        let tools = [TestUtils.createMathTool().descriptor]
+        let response = try await provider.generateText(messages: messages, tools: tools)
+        XCTAssertFalse(response.content.isEmpty)
+        // FoundationProvider doesn't simulate tool calls
+        XCTAssertNil(response.toolCalls)
+    }
 }

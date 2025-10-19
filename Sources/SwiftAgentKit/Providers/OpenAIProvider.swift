@@ -60,7 +60,7 @@ public struct OpenAIProvider: LanguageModelProvider {
         messages: [Message],
         tools: [ToolDescriptor]?
     ) -> AsyncThrowingStream<LLMStreamChunk, Error> {
-        // TODO: Implement OpenAI streaming
+        // TODO: Implement OpenAI streaming - placeholder for now
         AsyncThrowingStream { continuation in
             continuation.yield(LLMStreamChunk(text: "Streaming not yet implemented", isComplete: true))
             continuation.finish()
@@ -74,8 +74,10 @@ public struct OpenAIProvider: LanguageModelProvider {
     ) async throws -> T {
         // Use OpenAI's structured output if available, else fallback to text and parse
         let textResponse = try await generateText(messages: messages, tools: tools)
-        // Assume the content is JSON and decode to T
-        return try JSONDecoder().decode(T.self, from: textResponse.content.data(using: .utf8)!)
+        guard let data = textResponse.content.data(using: .utf8) else {
+            throw OpenAIError.invalidArgumentsEncoding
+        }
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     public func streamObject<T: Decodable>(
@@ -192,7 +194,7 @@ private extension Message {
         case .user(let content):
             return OpenAIMessage(role: "user", content: content)
         case .assistant(let content, let toolCalls):
-            let openAIToolCalls = toolCalls?.map { OpenAIToolCall(id: $0.id, type: "function", function: OpenAIFunctionCall(name: $0.name, arguments: ($0.arguments as? [String: Any]).map { try! JSONSerialization.data(withJSONObject: $0, options: []).base64EncodedString() } ?? "")) }
+            let openAIToolCalls = toolCalls?.map { OpenAIToolCall(id: $0.id, type: "function", function: OpenAIFunctionCall(name: $0.name, arguments: try! JSONSerialization.data(withJSONObject: $0.arguments, options: []).base64EncodedString())) }
             return OpenAIMessage(role: "assistant", content: content, tool_calls: openAIToolCalls)
         case .tool(let id, let content):
             return OpenAIMessage(role: "tool", content: content, tool_call_id: id)

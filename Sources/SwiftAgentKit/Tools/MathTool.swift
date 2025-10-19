@@ -1,6 +1,29 @@
 import Foundation
 import JSONSchema
 
+// Safe math expression evaluator using NSExpression with strict validation
+private struct MathEvaluator {
+    static func evaluate(_ expression: String) -> Double? {
+        // Additional validation: only allow basic math operations and numbers
+        let allowedPattern = "^[0-9+\\-*/().\\s]+$"
+        guard expression.range(of: allowedPattern, options: .regularExpression) != nil else {
+            return nil
+        }
+
+        // Check for potentially dangerous patterns
+        let dangerousPatterns = ["**", "import", "NS", "func", "class", "let", "var"]
+        for pattern in dangerousPatterns {
+            if expression.contains(pattern) {
+                return nil
+            }
+        }
+
+        // Use NSExpression but with very limited scope
+        let expr = NSExpression(format: expression)
+        return expr.expressionValue(with: nil, context: nil) as? Double
+    }
+}
+
 public struct MathTool: Tool {
     public init() {}
     public let name = "calculate"
@@ -27,7 +50,7 @@ public struct MathTool: Tool {
             throw ToolError.invalidInput
         }
 
-        // Basic validation to prevent injection
+        // Basic validation - only allow safe characters
         let allowedCharacters = CharacterSet(charactersIn: "0123456789+-*/(). ")
         guard expression.rangeOfCharacter(from: allowedCharacters.inverted) == nil else {
             throw ToolError.invalidInput
@@ -38,8 +61,7 @@ public struct MathTool: Tool {
     }
     
     private func evaluateMath(_ expression: String) -> Double {
-        // Simplified - use NSExpression or a proper evaluator
-        let expr = NSExpression(format: expression)
-        return expr.expressionValue(with: nil, context: nil) as? Double ?? 0.0
+        // Safe math evaluator - only allows basic arithmetic operations
+        return MathEvaluator.evaluate(expression) ?? 0.0
     }
 }

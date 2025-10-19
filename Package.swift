@@ -8,10 +8,11 @@ let package = Package(
         .library(name: "SwiftAgentKit", targets: ["SwiftAgentKit"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Flight-School/AnyCodable.git", from: "0.6.0")
+        .package(url: "https://github.com/Flight-School/AnyCodable.git", from: "0.6.0"),
+        .package(url: "https://github.com/kevinhermawan/swift-json-schema.git", .upToNextMajor(from: "1.0.0"))
     ],
     targets: [
-        .target(name: "SwiftAgentKit", dependencies: ["AnyCodable"]),
+        .target(name: "SwiftAgentKit", dependencies: ["AnyCodable", .product(name: "JSONSchema", package: "swift-json-schema")]),
         .testTarget(name: "SwiftAgentKitTests", dependencies: ["SwiftAgentKit"])
     ]
 )

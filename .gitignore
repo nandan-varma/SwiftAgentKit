@@ -48,3 +48,4 @@ fastlane/test_output/
 
 # Secrets / env
 .env
+.env.local

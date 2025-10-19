@@ -1,5 +1,6 @@
 import XCTest
 @testable import SwiftAgentKit
+import JSONSchema
 
 final class AgentTests: XCTestCase {
     func testAgentCreation() async throws {
@@ -44,9 +45,15 @@ final class AgentTests: XCTestCase {
         // Mock a provider that always returns tool calls
         class MockProvider: LanguageModelProvider {
             func generateText(messages: [Message], tools: [ToolDescriptor]?) async throws -> LLMResponse {
-                return LLMResponse(content: "", toolCalls: [ToolCall(name: "calculate", arguments: ["expression": "1+1"])])
+                return LLMResponse(content: "", toolCalls: [ToolCall(id: "test", name: "calculate", arguments: ["expression": "1+1"])])
             }
             func streamText(messages: [Message], tools: [ToolDescriptor]?) -> AsyncThrowingStream<LLMStreamChunk, Error> {
+                fatalError("Not implemented")
+            }
+            func generateObject<T: Decodable>(messages: [Message], outputSchema: JSONSchema, tools: [ToolDescriptor]?) async throws -> T {
+                fatalError("Not implemented")
+            }
+            func streamObject<T: Decodable>(messages: [Message], outputSchema: JSONSchema, tools: [ToolDescriptor]?) -> AsyncThrowingStream<T, Error> {
                 fatalError("Not implemented")
             }
         }
@@ -64,4 +71,21 @@ final class AgentTests: XCTestCase {
             // Expected
         }
     }
+
+    func testGenerateObject() async throws {
+        let provider = try FoundationProvider()
+        let schema = JSONSchema.object(
+            description: "Test schema",
+            properties: [
+                "example": .string(description: "Example string"),
+                "value": .integer(description: "Example int")
+            ],
+            required: ["example", "value"]
+        )
+        let result: TestObject = try await provider.generateObject(messages: [], outputSchema: schema, tools: nil)
+        XCTAssertEqual(result.example, "data")
+        XCTAssertEqual(result.value, 42)
+    }
+
+
 }

@@ -1,5 +1,6 @@
 import Foundation
 import AnyCodable
+import JSONSchema
 
 public struct OpenAIProvider: LanguageModelProvider {
     private let apiKey: String
@@ -31,12 +32,18 @@ public struct OpenAIProvider: LanguageModelProvider {
             messages: openAIMessages,
             temperature: 0.7,
             tools: openAITools,
-            tool_choice: "auto"
+            tool_choice: openAITools != nil ? "auto" : nil
         )
 
         request.httpBody = try JSONEncoder().encode(requestBody)
 
         let (data, _) = try await URLSession.shared.data(for: request)
+
+        // Check for error response first
+        if let errorResponse = try? JSONDecoder().decode(OpenAIErrorResponse.self, from: data) {
+            throw OpenAIError.apiError(errorResponse.error.message)
+        }
+
         let response = try JSONDecoder().decode(OpenAIResponse.self, from: data)
 
         guard let choice = response.choices.first else {
@@ -56,6 +63,28 @@ public struct OpenAIProvider: LanguageModelProvider {
         // TODO: Implement OpenAI streaming
         AsyncThrowingStream { continuation in
             continuation.yield(LLMStreamChunk(text: "Streaming not yet implemented", isComplete: true))
+            continuation.finish()
+        }
+    }
+
+    public func generateObject<T: Decodable>(
+        messages: [Message],
+        outputSchema: JSONSchema,
+        tools: [ToolDescriptor]?
+    ) async throws -> T {
+        // Use OpenAI's structured output if available, else fallback to text and parse
+        let textResponse = try await generateText(messages: messages, tools: tools)
+        // Assume the content is JSON and decode to T
+        return try JSONDecoder().decode(T.self, from: textResponse.content.data(using: .utf8)!)
+    }
+
+    public func streamObject<T: Decodable>(
+        messages: [Message],
+        outputSchema: JSONSchema,
+        tools: [ToolDescriptor]?
+    ) -> AsyncThrowingStream<T, Error> {
+        // TODO: Implement streaming
+        AsyncThrowingStream { continuation in
             continuation.finish()
         }
     }
@@ -96,6 +125,15 @@ private struct OpenAIResponse: Codable {
     let choices: [OpenAIChoice]
 }
 
+private struct OpenAIErrorResponse: Codable {
+    let error: OpenAIErrorDetails
+}
+
+private struct OpenAIErrorDetails: Codable {
+    let message: String
+    let type: String
+}
+
 private struct OpenAIChoice: Codable {
     let message: OpenAIMessage
 }
@@ -124,17 +162,23 @@ private struct OpenAIRequest: Codable {
     let messages: [OpenAIMessage]
     let temperature: Double
     let tools: [OpenAITool]?
-    let tool_choice: String
+    let tool_choice: String?
+    let response_format: OpenAIResponseFormat?
     let stream: Bool?
 
-    init(model: String, messages: [OpenAIMessage], temperature: Double, tools: [OpenAITool]?, tool_choice: String, stream: Bool? = nil) {
+    init(model: String, messages: [OpenAIMessage], temperature: Double, tools: [OpenAITool]?, tool_choice: String?, response_format: OpenAIResponseFormat? = nil, stream: Bool? = nil) {
         self.model = model
         self.messages = messages
         self.temperature = temperature
         self.tools = tools
         self.tool_choice = tool_choice
+        self.response_format = response_format
         self.stream = stream
     }
+}
+
+private struct OpenAIResponseFormat: Codable {
+    let type: String
 }
 
 
@@ -147,48 +191,29 @@ private extension Message {
             return OpenAIMessage(role: "system", content: content)
         case .user(let content):
             return OpenAIMessage(role: "user", content: content)
-        case .assistant(let content):
-            return OpenAIMessage(role: "assistant", content: content)
-        case .tool(let name, let content):
-            return OpenAIMessage(role: "tool", content: content, tool_call_id: name)
+        case .assistant(let content, let toolCalls):
+            let openAIToolCalls = toolCalls?.map { OpenAIToolCall(id: $0.id, type: "function", function: OpenAIFunctionCall(name: $0.name, arguments: ($0.arguments as? [String: Any]).map { try! JSONSerialization.data(withJSONObject: $0, options: []).base64EncodedString() } ?? "")) }
+            return OpenAIMessage(role: "assistant", content: content, tool_calls: openAIToolCalls)
+        case .tool(let id, let content):
+            return OpenAIMessage(role: "tool", content: content, tool_call_id: id)
         }
     }
 }
 
 private extension ToolDescriptor {
     static func toOpenAI(_ descriptor: ToolDescriptor) -> OpenAITool {
+        let encoder = JSONEncoder()
+        let parameters = try? encoder.encode(descriptor.inputSchema)
+        let dict = try? JSONSerialization.jsonObject(with: parameters ?? Data(), options: []) as? [String: Any]
         return OpenAITool(function: OpenAIFunction(
             name: descriptor.name,
             description: descriptor.description,
-            parameters: JSONSchema.toOpenAI(descriptor.inputSchema)
+            parameters: AnyCodable(dict ?? [:])
         ))
     }
 }
 
-private extension JSONSchema {
-    static func toOpenAI(_ schema: JSONSchema) -> AnyCodable {
-        switch schema {
-        case .string(let description):
-            return AnyCodable(["type": "string", "description": description as Any])
-        case .number(let description):
-            return AnyCodable(["type": "number", "description": description as Any])
-        case .boolean(let description):
-            return AnyCodable(["type": "boolean", "description": description as Any])
-        case .object(let properties):
-            return AnyCodable([
-                "type": "object",
-                "properties": properties.mapValues { JSONSchema.toOpenAI($0).value },
-                "required": Array(properties.keys)
-            ])
-        case .array(let itemSchema, let description):
-            return AnyCodable([
-                "type": "array",
-                "items": JSONSchema.toOpenAI(itemSchema).value,
-                "description": description as Any
-            ])
-        }
-    }
-}
+
 
 private extension OpenAIToolCall {
     func toToolCall() throws -> ToolCall {
@@ -196,6 +221,6 @@ private extension OpenAIToolCall {
             throw OpenAIError.invalidArgumentsEncoding
         }
         let arguments = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        return ToolCall(name: function.name, arguments: arguments)
+        return ToolCall(id: id, name: function.name, arguments: arguments)
     }
 }

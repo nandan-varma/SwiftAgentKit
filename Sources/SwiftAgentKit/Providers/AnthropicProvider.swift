@@ -1,5 +1,6 @@
 import Foundation
 import AnyCodable
+import JSONSchema
 
 public struct AnthropicProvider: LanguageModelProvider {
     private let apiKey: String
@@ -54,6 +55,26 @@ public struct AnthropicProvider: LanguageModelProvider {
             continuation.finish()
         }
     }
+
+    public func generateObject<T: Decodable>(
+        messages: [Message],
+        outputSchema: JSONSchema,
+        tools: [ToolDescriptor]?
+    ) async throws -> T {
+        let textResponse = try await generateText(messages: messages, tools: tools)
+        return try JSONDecoder().decode(T.self, from: textResponse.content.data(using: .utf8)!)
+    }
+
+    public func streamObject<T: Decodable>(
+        messages: [Message],
+        outputSchema: JSONSchema,
+        tools: [ToolDescriptor]?
+    ) -> AsyncThrowingStream<T, Error> {
+        // TODO: Implement streaming
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
 }
 
 // Anthropic API Types
@@ -91,7 +112,7 @@ private extension Message {
             return AnthropicMessage(role: "system", content: content)
         case .user(let content):
             return AnthropicMessage(role: "user", content: content)
-        case .assistant(let content):
+        case .assistant(let content, _):
             return AnthropicMessage(role: "assistant", content: content)
         case .tool(_, let content):
             return AnthropicMessage(role: "tool", content: content)
@@ -101,35 +122,14 @@ private extension Message {
 
 private extension ToolDescriptor {
     func toAnthropic() -> AnthropicTool {
+        let encoder = JSONEncoder()
+        let schemaData = try? encoder.encode(inputSchema)
+        let dict = try? JSONSerialization.jsonObject(with: schemaData ?? Data(), options: []) as? [String: Any]
         return AnthropicTool(
             name: name,
             description: description,
-            input_schema: inputSchema.toAnthropic()
+            input_schema: AnyCodable(dict ?? [:])
         )
     }
 }
 
-private extension JSONSchema {
-    func toAnthropic() -> AnyCodable {
-        switch self {
-        case .string(let description):
-            return AnyCodable(["type": "string", "description": description as Any])
-        case .number(let description):
-            return AnyCodable(["type": "number", "description": description as Any])
-        case .boolean(let description):
-            return AnyCodable(["type": "boolean", "description": description as Any])
-        case .object(let properties):
-            return AnyCodable([
-                "type": "object",
-                "properties": properties.mapValues { $0.toAnthropic().value },
-                "required": Array(properties.keys)
-            ])
-        case .array(let itemSchema, let description):
-            return AnyCodable([
-                "type": "array",
-                "items": itemSchema.toAnthropic().value,
-                "description": description as Any
-            ])
-        }
-    }
-}

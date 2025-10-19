@@ -71,3 +71,13 @@ Protocol for agent tools.
 - OpenAI API key (for OpenAI provider)
 - Anthropic API key (for Anthropic provider)
 - Apple Intelligence enabled (for Foundation Models, optional)
+
+## Testing
+
+To run the full test suite:
+
+1. Copy `.env.local.example` to `.env.local` and add your OpenAI API key.
+2. Run `swift test` - unit tests will run with FoundationProvider.
+3. Integration tests with OpenAI will run if API key is present.
+
+Note: OpenAI tests are skipped in CI unless API key is provided as a secret.

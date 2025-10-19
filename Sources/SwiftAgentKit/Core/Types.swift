@@ -1,21 +1,24 @@
 import Foundation
+import JSONSchema
 
 public enum Message {
     case system(String)
     case user(String)
-    case assistant(String)
-    case tool(name: String, content: String)
+    case assistant(content: String, toolCalls: [ToolCall]?)
+    case tool(id: String, content: String)
 }
 
 public struct ToolDescriptor {
     public let name: String
     public let description: String
     public let inputSchema: JSONSchema
+    public let outputSchema: JSONSchema?  // Optional for now, to be added to Tool
 }
 
 public struct ToolResult {
     public let content: String
     public let data: [String: Any]?
+    public let structuredOutput: Any?
 }
 
 public struct LLMResponse {
@@ -24,6 +27,7 @@ public struct LLMResponse {
 }
 
 public struct ToolCall {
+    public let id: String
     public let name: String
     public let arguments: [String: Any]
 }
@@ -33,10 +37,3 @@ public struct LLMStreamChunk {
     public let isComplete: Bool
 }
 
-public indirect enum JSONSchema {
-    case string(description: String? = nil)
-    case number(description: String? = nil)
-    case boolean(description: String? = nil)
-    case object([String: JSONSchema])
-    case array(JSONSchema, description: String? = nil)
-}

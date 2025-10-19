@@ -55,16 +55,17 @@ public final class Agent {
             )
             
             if let toolCalls = response.toolCalls {
+                context.addMessage(.assistant(content: response.content, toolCalls: toolCalls))
                 for call in toolCalls {
                     if let tool = tools.first(where: { $0.name == call.name }) {
                         let result = try await tool.execute(input: call.arguments)
                         toolResults.append(result)
-                        context.addMessage(.tool(name: call.name, content: result.content))
+                        context.addMessage(.tool(id: call.id, content: result.content))
                     }
                 }
                 iterations += 1
             } else {
-                context.addMessage(.assistant(response.content))
+                context.addMessage(.assistant(content: response.content, toolCalls: nil))
                 return AgentResponse(content: response.content, toolResults: toolResults.isEmpty ? nil : toolResults)
             }
         }

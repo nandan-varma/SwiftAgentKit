@@ -1,13 +1,14 @@
 import Foundation
-import JSONSchema
+@preconcurrency import JSONSchema
+@preconcurrency import SwiftyJSON
 
-public protocol Tool {
+public protocol Tool: Sendable {
     var name: String { get }
     var description: String { get }
     var inputSchema: JSONSchema { get }
     var outputSchema: JSONSchema { get }
 
-    func execute(input: [String: Any]) async throws -> ToolResult
+    func execute(input: [String: JSON]) async throws -> ToolResult
 }
 
 extension Tool {

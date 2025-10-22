@@ -21,7 +21,7 @@ final class AgentIntegrationTests: XCTestCase {
             throw XCTSkip("OpenAI API key not available")
         }
 
-        let provider = OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!, model: TestConfig.defaultModel)
+        let provider = try OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!, model: TestConfig.defaultModel)
         let agent = Agent(
             provider: provider,
             tools: [TestUtils.createMathTool(), TestUtils.createWeatherTool()],

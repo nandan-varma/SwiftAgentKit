@@ -48,17 +48,17 @@ final class FoundationProviderTests: XCTestCase {
         XCTAssertTrue(chunks.contains { $0.contains("helpful AI assistant") })
     }
 
-    func testStreamObject() async throws {
-        let messages = [TestUtils.createTestMessage(content: "Stream object")]
-        let schema = TestUtils.createTestSchema()
-        let stream: AsyncThrowingStream<TestObject, Error> = provider.streamObject(messages: messages, outputSchema: schema, tools: nil)
-        var objects: [TestObject] = []
-        for try await object in stream {
-            objects.append(object)
-        }
-        // Currently stubbed, so should be empty
-        XCTAssertTrue(objects.isEmpty)
-    }
+//    func testStreamObject() async throws {
+//        let messages = [TestUtils.createTestMessage(content: "Stream object")]
+//        let schema = TestUtils.createTestSchema()
+//        let stream: AsyncThrowingStream<TestObject, Error> = provider.streamObject(messages: messages, outputSchema: schema, tools: nil)
+//        var objects: [TestObject] = []
+//        for try await object in stream {
+//            objects.append(object)
+//        }
+//        // Currently stubbed, so should be empty
+//        XCTAssertTrue(objects.isEmpty)
+//    }
 
     func testFoundationProviderToolCalls() async throws {
         let messages = [TestUtils.createTestMessage(content: "Calculate 2 + 2")]

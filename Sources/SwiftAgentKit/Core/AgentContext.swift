@@ -1,11 +1,11 @@
 import Foundation
 
-public protocol ContextStore {
+public protocol ContextStore: Sendable {
     func save(messages: [Message]) async throws
     func load() async throws -> [Message]
 }
 
-public class InMemoryStore: ContextStore {
+public class InMemoryStore: @unchecked Sendable, ContextStore {
     private var messages: [Message] = []
 
     public init() {}
@@ -19,7 +19,7 @@ public class InMemoryStore: ContextStore {
     }
 }
 
-public class AgentContext {
+public actor AgentContext {
     private let store: ContextStore
     public private(set) var messages: [Message] = []
     
@@ -27,12 +27,9 @@ public class AgentContext {
         self.store = store
     }
     
-    public func addMessage(_ message: Message) {
+    public func addMessage(_ message: Message) async {
         messages.append(message)
-        // TODO: Implement async saving without data races
-        // Task.detached { [messages = self.messages, store = self.store] in
-        //     try? await store.save(messages: messages)
-        // }
+        try? await store.save(messages: messages)
     }
     
     public func load() async throws {

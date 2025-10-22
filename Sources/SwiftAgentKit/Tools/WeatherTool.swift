@@ -1,5 +1,6 @@
 import Foundation
 import JSONSchema
+import SwiftyJSON
 
 public struct WeatherTool: Tool {
     public init() {}
@@ -22,13 +23,13 @@ public struct WeatherTool: Tool {
         required: ["weather"]
     )
     
-    public func execute(input: [String: Any]) async throws -> ToolResult {
-        guard let location = input["location"] as? String, !location.isEmpty else {
+    public func execute(input: [String: JSON]) async throws -> ToolResult {
+        guard let location = input["location"]?.string, !location.isEmpty else {
             throw ToolError.invalidInput
         }
 
         // Mock weather API call - replace with real API
         let weather = "Sunny, 72°F"
-        return ToolResult(content: "Weather in \(location): \(weather)", data: ["weather": weather], structuredOutput: ["weather": weather])
+        return ToolResult(content: "Weather in \(location): \(weather)", data: ["weather": JSON(weather)], structuredOutput: JSON(["weather": weather]))
     }
 }

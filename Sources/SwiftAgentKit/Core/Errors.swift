@@ -12,4 +12,5 @@ enum OpenAIError: Error {
     case invalidArgumentsEncoding
     case noResponseChoices
     case apiError(String)
+    case invalidResponseFormat(String)
 }

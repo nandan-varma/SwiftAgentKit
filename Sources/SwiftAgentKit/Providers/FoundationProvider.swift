@@ -25,7 +25,7 @@ public struct FoundationProvider: LanguageModelProvider {
         }
     }
 
-    public func generateObject<T: Decodable>(
+    public func generateObject<T: Decodable & Sendable>(
         messages: [Message],
         outputSchema: JSONSchema,
         tools: [ToolDescriptor]?
@@ -39,14 +39,28 @@ public struct FoundationProvider: LanguageModelProvider {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    public func streamObject<T: Decodable>(
-        messages: [Message],
-        outputSchema: JSONSchema,
-        tools: [ToolDescriptor]?
-    ) -> AsyncThrowingStream<T, Error> {
-        // TODO: Implement streaming
-        AsyncThrowingStream { continuation in
-            continuation.finish()
-        }
-    }
+//    public func streamObject<T: Decodable & Sendable>(
+//        messages: [Message],
+//        outputSchema: JSONSchema,
+//        tools: [ToolDescriptor]?
+//    ) -> AsyncThrowingStream<T, Error> {
+//        AsyncThrowingStream { continuation in
+//            Task {
+//                // Mock: Simulate streaming by yielding the object after a short delay
+//                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+//                let mockJSON = "{\"example\": \"streamed data\", \"value\": 42}"
+//                guard let data = mockJSON.data(using: .utf8) else {
+//                    continuation.finish(throwing: ToolError.invalidInput)
+//                    return
+//                }
+//                do {
+//                    let object = try JSONDecoder().decode(T.self, from: data)
+//                    continuation.yield(object)
+//                    continuation.finish()
+//                } catch {
+//                    continuation.finish(throwing: error)
+//                }
+//            }
+//        }
+//    }
 }

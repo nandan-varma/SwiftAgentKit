@@ -1,5 +1,6 @@
 import Foundation
 import JSONSchema
+import SwiftyJSON
 
 // Safe math expression evaluator using NSExpression with strict validation
 private struct MathEvaluator {
@@ -45,8 +46,8 @@ public struct MathTool: Tool {
         required: ["result"]
     )
     
-    public func execute(input: [String: Any]) async throws -> ToolResult {
-        guard let expression = input["expression"] as? String else {
+    public func execute(input: [String: JSON]) async throws -> ToolResult {
+        guard let expression = input["expression"]?.string else {
             throw ToolError.invalidInput
         }
 
@@ -57,7 +58,7 @@ public struct MathTool: Tool {
         }
 
         let result = evaluateMath(expression)
-        return ToolResult(content: "Result: \(result)", data: ["result": result], structuredOutput: ["result": result])
+        return ToolResult(content: "Result: \(result)", data: ["result": JSON(result)], structuredOutput: JSON(["result": result]))
     }
     
     private func evaluateMath(_ expression: String) -> Double {

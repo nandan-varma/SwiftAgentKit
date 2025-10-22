@@ -7,7 +7,7 @@ final class OpenAIProviderTests: XCTestCase {
 
     override func setUp() async throws {
         if TestConfig.shared.hasOpenAIKey {
-            provider = OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!, model: TestConfig.defaultModel)
+            provider = try OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!, model: TestConfig.defaultModel)
         }
     }
 
@@ -83,7 +83,7 @@ final class OpenAIProviderTests: XCTestCase {
     }
 
     func testInvalidAPIKey() async throws {
-        let invalidProvider = OpenAIProvider(apiKey: "invalid", model: TestConfig.defaultModel)
+        let invalidProvider = try OpenAIProvider(apiKey: "invalid", model: TestConfig.defaultModel)
         let messages = [TestUtils.createTestMessage(content: "Hello")]
         do {
             _ = try await invalidProvider.generateText(messages: messages, tools: nil)

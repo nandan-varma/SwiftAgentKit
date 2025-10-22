@@ -1,6 +1,7 @@
 import XCTest
 @testable import SwiftAgentKit
 import JSONSchema
+import SwiftyJSON
 
 final class AgentTests: XCTestCase {
     func testAgentCreation() async throws {
@@ -43,18 +44,23 @@ final class AgentTests: XCTestCase {
 
     func testAgentMaxIterations() async throws {
         // Mock a provider that always returns tool calls
-        class MockProvider: LanguageModelProvider {
+        class MockProvider: LanguageModelProvider, @unchecked Sendable {
             func generateText(messages: [Message], tools: [ToolDescriptor]?) async throws -> LLMResponse {
-                return LLMResponse(content: "", toolCalls: [ToolCall(id: "test", name: "calculate", arguments: ["expression": "1+1"])])
+                return LLMResponse(content: "", toolCalls: [ToolCall(id: "test", name: "calculate", arguments: ["expression": JSON("1+1")])])
             }
             func streamText(messages: [Message], tools: [ToolDescriptor]?) -> AsyncThrowingStream<LLMStreamChunk, Error> {
-                fatalError("Not implemented")
+                AsyncThrowingStream { continuation in
+                    continuation.yield(LLMStreamChunk(text: "Mock streaming response", isComplete: true))
+                    continuation.finish()
+                }
             }
             func generateObject<T: Decodable>(messages: [Message], outputSchema: JSONSchema, tools: [ToolDescriptor]?) async throws -> T {
-                fatalError("Not implemented")
+                throw ToolError.invalidInput
             }
             func streamObject<T: Decodable>(messages: [Message], outputSchema: JSONSchema, tools: [ToolDescriptor]?) -> AsyncThrowingStream<T, Error> {
-                fatalError("Not implemented")
+                AsyncThrowingStream { continuation in
+                    continuation.finish()
+                }
             }
         }
 
@@ -92,18 +98,20 @@ final class AgentTests: XCTestCase {
         let context = AgentContext(store: store)
 
         let message = Message.user("Test message")
-        context.addMessage(message)
+        await context.addMessage(message)
 
         // Since persistence is not implemented, just test basic functionality
-        XCTAssertEqual(context.messages.count, 1)
-        if case .user(let content) = context.messages.first! {
+        let messages = await context.messages
+        XCTAssertEqual(messages.count, 1)
+        if case .user(let content) = messages.first! {
             XCTAssertEqual(content, "Test message")
         }
 
-        // Test load (should be empty since save is not implemented)
+        // Test load (should have the saved message)
         let loadedContext = AgentContext(store: store)
         try await loadedContext.load()
-        XCTAssertEqual(loadedContext.messages.count, 0)
+        let loadedMessages = await loadedContext.messages
+        XCTAssertEqual(loadedMessages.count, 1)
     }
 
     func testMathToolComplexExpressions() async throws {
@@ -121,7 +129,7 @@ final class AgentTests: XCTestCase {
         ]
 
         for (expression, expected) in testCases {
-            let result = try await tool.execute(input: ["expression": expression])
+            let result = try await tool.execute(input: ["expression": JSON(expression)])
             XCTAssertEqual(result.content, "Result: \(expected)")
         }
     }

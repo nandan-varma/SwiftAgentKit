@@ -1,22 +1,22 @@
 {
-  "originHash" : "de01ddf2075af5bbae311bde31004b6b0e5d33772b5441fcbc695fe01a3a2bc3",
+  "originHash" : "1205e4e7807a3877d337278cd9e3d19cc76a40d940ab9f6ab2ecbcdbce298bcf",
   "pins" : [
-    {
-      "identity" : "anycodable",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Flight-School/AnyCodable.git",
-      "state" : {
-        "revision" : "862808b2070cd908cb04f9aafe7de83d35f81b05",
-        "version" : "0.6.7"
-      }
-    },
     {
       "identity" : "swift-json-schema",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/kevinhermawan/swift-json-schema.git",
       "state" : {
-        "revision" : "48cade5fb09c6fdc86adcf9af7e43a2c7582a65a",
-        "version" : "1.0.3"
+        "revision" : "4a9284e44d8ef2bfc863734e9ff535909ae6b27a",
+        "version" : "2.0.1"
+      }
+    },
+    {
+      "identity" : "swiftyjson",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SwiftyJSON/SwiftyJSON.git",
+      "state" : {
+        "revision" : "af76cf3ef710b6ca5f8c05f3a31307d44a3c5828",
+        "version" : "5.0.2"
       }
     }
   ],

@@ -1,8 +1,8 @@
 # SwiftAgentKit
 
-[![Swift](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/platform-macOS%2015%2B%20%7C%20iOS%2018%2B-blue.svg)]()
-[![License](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue.svg)](https://developer.apple.com)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A Swift-native SDK for building autonomous AI agents that can interact with language models, execute tools, and maintain conversation context. Inspired by Vercel's AI SDK but designed specifically for Swift's concurrency model and type safety.
 

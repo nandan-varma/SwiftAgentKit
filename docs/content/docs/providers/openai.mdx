@@ -1,0 +1,115 @@
+---
+title: OpenAI
+description: Using SwiftAgentKit with OpenAI's Chat Completions API.
+---
+
+## Setup
+
+```swift
+import SwiftAgentKit
+
+let provider = try OpenAIProvider(apiKey: "your-api-key")
+```
+
+```swift
+public init(
+    apiKey: String,
+    model: String = "gpt-4o-mini",
+    baseURL: URL? = nil,
+    timeout: TimeInterval = 30.0,
+    session: URLSession = .shared
+) throws
+```
+
+| Parameter | Description |
+|---|---|
+| `apiKey` | Your OpenAI API key. Throws `OpenAIError.apiError` if empty. |
+| `model` | Defaults to `gpt-4o-mini`. Check OpenAI's current model listing for the best fit — pass any Chat Completions-compatible model ID. |
+| `baseURL` | Override for proxying requests; defaults to `https://api.openai.com`. |
+| `timeout` | Per-request timeout, in seconds. |
+| `session` | The `URLSession` to issue requests on. Override this in tests to inject a mock. |
+
+## Tool calling
+
+OpenAI's Chat Completions API hands control back to the caller when the
+model wants to call a tool — `generateText` returns those as pending
+`LLMResponse.toolCalls`, and `Agent`'s loop executes them. You don't need to
+do anything special; just pass `tools:` to `Agent`:
+
+```swift
+let agent = Agent(
+    provider: provider,
+    tools: [MathTool(), WeatherTool()],
+    instructions: "Use tools when appropriate."
+)
+
+let result = try await agent.respond(to: "What's 7 * 8 and the weather in Tokyo?")
+```
+
+## Structured output
+
+`generateObject` uses OpenAI's `response_format: json_schema` — the schema
+you pass is sent directly to the API, and (when the model/account supports
+it) OpenAI constrains generation to match it:
+
+```swift
+struct Person: Codable {
+    let name: String
+    let age: Int
+}
+
+let schema = JSONSchema.object(
+    description: "Person information",
+    properties: [
+        "name": .string(description: "Person's name"),
+        "age": .integer(description: "Person's age")
+    ],
+    required: ["name", "age"]
+)
+
+let person: Person = try await provider.generateObject(
+    messages: [.user("Create a person named John who is 30 years old")],
+    outputSchema: schema,
+    tools: nil
+)
+```
+
+<Callout title="Only fields in `required` are guaranteed">
+  SwiftAgentKit doesn't currently send `strict: true`, so OpenAI's
+  `json_schema` mode is best-effort rather than strictly enforced — a field
+  you didn't mark as `required` may legitimately be omitted by the model.
+  If your target type has non-optional Swift properties for those fields,
+  decoding can fail. Mark everything you truly need as `required`, or make
+  the corresponding Swift properties optional.
+</Callout>
+
+If OpenAI reports that structured output isn't supported for the given
+model/account, `generateObject` automatically falls back to asking the model
+to answer in prose JSON and parsing the response text.
+
+## Streaming
+
+```swift
+for try await chunk in provider.streamText(messages: messages, tools: nil) {
+    print(chunk.text, terminator: "")
+    if chunk.isComplete { break }
+}
+```
+
+Streaming is text-only — tool-call deltas aren't surfaced through
+`LLMStreamChunk` for any provider.
+
+## Errors
+
+`OpenAIProvider` throws `OpenAIError`:
+
+```swift
+public enum OpenAIError: Error, Sendable {
+    case invalidArgumentsEncoding
+    case noResponseChoices
+    case apiError(String)
+    case invalidResponseFormat(String)
+}
+```
+
+See [Error Handling](/docs/error-handling) for the full picture across all providers.

@@ -1,0 +1,146 @@
+---
+title: Error Handling
+description: Every error type SwiftAgentKit can throw, and how to catch them.
+---
+
+## All error types are public
+
+Every error enum in SwiftAgentKit is `public` and `Sendable`, so you can
+catch them by name from your own code — not just from within the package
+itself:
+
+```swift
+do {
+    let result = try await agent.respond(to: userInput)
+    print(result.content)
+} catch AgentError.maxIterationsExceeded(let partial) {
+    print("Hit the iteration cap. Partial content: \(partial.content)")
+} catch ToolError.invalidInput {
+    print("A tool received invalid input")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## AgentError
+
+```swift
+public enum AgentError: Error, Sendable {
+    case maxIterationsExceeded(partial: AgentResponse)
+}
+```
+
+Thrown by `Agent.respond`/`streamResponse` when the tool-execution loop
+exceeds `maxIterations` without producing a final answer. `partial` carries
+whatever `content` and `toolResults` had already been produced — you don't
+lose completed work just because the cap was hit:
+
+```swift
+do {
+    let result = try await agent.respond(to: input, maxIterations: 5)
+} catch AgentError.maxIterationsExceeded(let partial) {
+    // partial.content, partial.toolResults are still usable
+}
+```
+
+## ToolError
+
+```swift
+public enum ToolError: Error, Sendable {
+    case invalidInput
+}
+```
+
+The generic error for "the input given to a tool didn't have what it
+needed" — thrown by both built-in tools (`MathTool`, `WeatherTool`) for
+missing/malformed required fields, and a reasonable default for your own
+tools unless a more specific error is warranted.
+
+## OpenAIError
+
+```swift
+public enum OpenAIError: Error, Sendable {
+    case invalidArgumentsEncoding
+    case noResponseChoices
+    case apiError(String)
+    case invalidResponseFormat(String)
+}
+```
+
+- `apiError(_:)` — OpenAI's API returned an error response; the string is
+  OpenAI's own error message.
+- `invalidResponseFormat(_:)` — `generateObject` couldn't decode the
+  response into your target type.
+- `noResponseChoices` — the API returned zero completion choices.
+- `invalidArgumentsEncoding` — a tool call's arguments couldn't be decoded
+  as JSON.
+
+## AnthropicError
+
+```swift
+public enum AnthropicError: Error, Sendable, Equatable {
+    case invalidAPIKey
+    case apiError(String)
+    case invalidResponseFormat(String)
+}
+```
+
+- `invalidAPIKey` — thrown from `AnthropicProvider.init` if the given
+  `apiKey` is empty.
+- `apiError(_:)` — Anthropic's API returned an error response; the string is
+  Anthropic's own error message.
+- `invalidResponseFormat(_:)` — `generateObject` couldn't decode the
+  response into your target type.
+
+## FoundationModelsError
+
+```swift
+public enum FoundationModelsError: Error, Sendable {
+    case modelUnavailable(String)
+    case invalidResponseFormat(String)
+    case unsupportedPlatform
+}
+```
+
+- `modelUnavailable(_:)` — Apple Intelligence isn't enabled, the device
+  isn't eligible, or the model isn't ready. Check System Settings.
+- `unsupportedPlatform` — `FoundationProvider` used where the
+  `FoundationModels` framework isn't available at compile time.
+- `invalidResponseFormat(_:)` — `generateObject` couldn't decode the
+  response into your target type.
+
+## WeatherToolError
+
+```swift
+public enum WeatherToolError: Error, Sendable, Equatable {
+    case locationNotFound(String)
+    case apiError(String)
+}
+```
+
+Thrown by the built-in `WeatherTool` — `locationNotFound(_:)` when
+Open-Meteo's geocoding search returns no results, `apiError(_:)` for a
+non-2xx HTTP response from either Open-Meteo endpoint.
+
+## Recommended pattern
+
+Catch the specific errors you can meaningfully react to first, and fall
+back to a generic `catch` for everything else — including errors from
+`URLSession` (network failures), `JSONDecoder` (unexpected decode issues),
+or `Apple`'s own `LanguageModelSession.GenerationError` cases (guardrail
+violations, context window exceeded, etc., which `FoundationProvider`
+doesn't wrap — they propagate as-is):
+
+```swift
+do {
+    let result = try await agent.respond(to: userInput)
+    print(result.content)
+} catch AgentError.maxIterationsExceeded(let partial) {
+    // Recoverable: show partial.content to the user, maybe offer to continue
+} catch let error as WeatherToolError {
+    // Tool-specific: maybe retry with a corrected location
+} catch {
+    // Network errors, decode errors, provider API errors, etc.
+    print("Error: \(error.localizedDescription)")
+}
+```

@@ -1,0 +1,94 @@
+---
+title: Streaming
+description: Incremental responses via Agent.streamResponse and provider.streamText.
+---
+
+## LLMStreamChunk
+
+Every streaming API — `Agent.streamResponse` and each provider's
+`streamText` — yields the same chunk type:
+
+```swift
+public struct LLMStreamChunk: Sendable {
+    public let text: String      // incremental text (empty on the final chunk)
+    public let isComplete: Bool  // true on the last chunk in the stream
+}
+```
+
+## Streaming from an Agent
+
+```swift
+for try await chunk in await agent.streamResponse(to: "Tell me a short story") {
+    print(chunk.text, terminator: "")
+}
+```
+
+Remember `Agent` is an `actor` — `streamResponse` needs `await` even though
+it isn't itself `async` (it returns a stream synchronously; the async work
+happens inside the stream's `Task`).
+
+### Behavior depends on whether tools are registered
+
+- **`Agent(tools: [])`** — real, incremental, token-by-token streaming
+  straight from `provider.streamText`.
+- **`Agent(tools: [...])`** — a tool call can only be detected from a
+  *complete* response, so `streamResponse` internally resolves the turn via
+  the same non-streamed loop as `respond(to:)`, then delivers the finished
+  answer as a **single completing chunk**. This means the UI won't see
+  incremental text mid-response when tools are involved — that's a
+  deliberate cost/latency tradeoff (re-requesting the same content as a
+  stream would double the cost for no benefit), not a bug.
+
+```swift
+// No tools — real incremental streaming
+let plainAgent = Agent(provider: provider, tools: [], instructions: "...")
+for try await chunk in await plainAgent.streamResponse(to: "Tell me a joke") {
+    print(chunk.text, terminator: "") // arrives token-by-token
+}
+
+// With tools — one completing chunk after the tool loop resolves
+let toolAgent = Agent(provider: provider, tools: [MathTool()], instructions: "...")
+for try await chunk in await toolAgent.streamResponse(to: "What's 12 * 12?") {
+    print(chunk.text) // arrives all at once, isComplete == true
+}
+```
+
+### Error handling
+
+`streamResponse`'s `AsyncThrowingStream` fails the same way `respond(to:)`
+throws — including `AgentError.maxIterationsExceeded(partial:)` if the tool
+loop exceeds `maxIterations`:
+
+```swift
+do {
+    for try await chunk in await agent.streamResponse(to: input, maxIterations: 5) {
+        print(chunk.text, terminator: "")
+    }
+} catch AgentError.maxIterationsExceeded(let partial) {
+    print("\nHit the iteration cap. Partial content: \(partial.content)")
+} catch {
+    print("\nStream failed: \(error)")
+}
+```
+
+## Streaming from a provider directly
+
+If you don't need the tool-execution loop or conversation history
+management `Agent` provides, you can call a provider's `streamText`
+directly:
+
+```swift
+let messages: [Message] = [
+    .system("You are a helpful assistant."),
+    .user("Tell me a short story")
+]
+
+for try await chunk in provider.streamText(messages: messages, tools: nil) {
+    print(chunk.text, terminator: "")
+    if chunk.isComplete { break }
+}
+```
+
+This is text-only for every provider (OpenAI, Anthropic, and
+`FoundationProvider` alike) — tool-call deltas aren't currently surfaced
+incrementally through `LLMStreamChunk` for any backend.

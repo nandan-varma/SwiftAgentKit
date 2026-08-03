@@ -1,0 +1,65 @@
+---
+title: Installation
+description: Add SwiftAgentKit to your Swift package or Xcode project.
+---
+
+## Swift Package Manager
+
+Add SwiftAgentKit as a dependency in your `Package.swift`:
+
+```swift title="Package.swift"
+dependencies: [
+    .package(url: "https://github.com/nandan-varma/SwiftAgentKit.git", from: "1.0.0")
+]
+```
+
+Then add `"SwiftAgentKit"` to your target's dependencies:
+
+```swift title="Package.swift"
+.target(
+    name: "YourTarget",
+    dependencies: ["SwiftAgentKit"]
+)
+```
+
+In Xcode, use **File → Add Package Dependencies…** and paste the repository
+URL.
+
+## Requirements
+
+<Callout title="macOS/iOS 26+ is a hard requirement" type="warn">
+  This isn't a conservative default — it's required because `FoundationProvider`
+  links against Apple's real `FoundationModels` framework, which only ships
+  starting with macOS/iOS 26. `Package.swift` declares
+  `platforms: [.macOS(.v26), .iOS(.v26)]` as the source of truth.
+</Callout>
+
+- **macOS 26+ / iOS 26+**
+- **Swift 6.2+**
+- An **OpenAI API key**, if you use `OpenAIProvider`.
+- An **Anthropic API key**, if you use `AnthropicProvider`.
+- **Apple Intelligence enabled**, if you use `FoundationProvider` — check
+  System Settings if `FoundationModelsError.modelUnavailable` is thrown at
+  runtime.
+
+## Dependencies
+
+SwiftAgentKit depends on two small, focused packages, both resolved
+automatically by SwiftPM:
+
+- [`SwiftyJSON`](https://github.com/SwiftyJSON/SwiftyJSON) — the dynamic
+  `JSON` value type used for tool inputs/outputs (`Tool.execute(input:)`,
+  `ToolResult`, `ToolCall.arguments`).
+- [`swift-json-schema`](https://github.com/kevinhermawan/swift-json-schema) —
+  the `JSONSchema` type used to describe tool input/output shapes.
+
+## Verifying the install
+
+```swift
+import SwiftAgentKit
+
+let provider = try FoundationProvider()
+```
+
+If this compiles and macOS/iOS 26+ is your deployment target, you're set.
+Continue to the [Quick Start](/docs/quick-start).

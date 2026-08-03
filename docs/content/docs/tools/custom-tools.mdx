@@ -1,0 +1,167 @@
+---
+title: Custom Tools
+description: Writing your own Tool from scratch.
+---
+
+## A minimal example
+
+Any type conforming to `Tool` can be passed to `Agent(tools:)`. Here's a
+tool that doubles a number:
+
+```swift
+import SwiftAgentKit
+import JSONSchema
+import SwiftyJSON
+
+struct DoubleTool: Tool {
+    let name = "double_number"
+    let description = "Doubles a given integer"
+
+    let inputSchema: JSONSchema = .object(
+        description: "Input parameters",
+        properties: [
+            "value": .integer(description: "A number to double")
+        ],
+        required: ["value"]
+    )
+
+    let outputSchema: JSONSchema = .object(
+        description: "Result",
+        properties: [
+            "result": .integer(description: "The doubled value")
+        ],
+        required: ["result"]
+    )
+
+    func execute(input: [String: JSON]) async throws -> ToolResult {
+        guard let value = input["value"]?.int else {
+            throw ToolError.invalidInput
+        }
+
+        let result = value * 2
+        return ToolResult(
+            content: "Result: \(result)",
+            data: ["result": JSON(result)],
+            structuredOutput: JSON(["result": result])
+        )
+    }
+}
+```
+
+```swift
+let agent = Agent(
+    provider: provider,
+    tools: [DoubleTool()],
+    instructions: "Use the double_number tool when needed."
+)
+```
+
+<Callout title="Reading input values" type="info">
+  `input` is `[String: JSON]` (SwiftyJSON), not `[String: Any]`. Use
+  SwiftyJSON's typed accessors — `.string`, `.int`, `.double`, `.bool`,
+  `.array`, `.dictionaryValue` — rather than `as?` casts.
+</Callout>
+
+## A tool with its own error type
+
+The built-in tools each define a domain-specific error enum rather than
+overloading `ToolError` for everything — follow the same pattern for your
+own tools with distinct failure modes:
+
+```swift
+enum LookupToolError: Error, Sendable {
+    case notFound(String)
+    case rateLimited
+}
+
+struct LookupTool: Tool {
+    let name = "lookup_record"
+    let description = "Looks up a record by ID"
+
+    let inputSchema: JSONSchema = .object(
+        properties: ["id": .string(description: "Record ID")],
+        required: ["id"]
+    )
+    let outputSchema: JSONSchema = .object(
+        properties: ["record": .string(description: "The record's contents")]
+    )
+
+    func execute(input: [String: JSON]) async throws -> ToolResult {
+        guard let id = input["id"]?.string, !id.isEmpty else {
+            throw ToolError.invalidInput
+        }
+
+        guard let record = try await fetchRecord(id: id) else {
+            throw LookupToolError.notFound(id)
+        }
+
+        return ToolResult(content: record)
+    }
+
+    private func fetchRecord(id: String) async throws -> String? {
+        // ...
+        return nil
+    }
+}
+```
+
+`Agent`'s tool-execution loop catches *any* error thrown from
+`execute(input:)` and turns it into a `.tool` message —
+`"Tool execution failed: \(error.localizedDescription)"` — rather than
+aborting the whole conversation. Give your error types a reasonable
+`localizedDescription` (or a `LocalizedError` conformance) so the model gets
+a useful message to react to.
+
+## Calling a real network API
+
+`WeatherTool`'s implementation is a good reference for a tool that calls a
+real HTTP API — accepting an injectable `URLSession`, decoding a typed
+response, and mapping failure cases to a specific error enum:
+
+```swift
+struct MyAPITool: Tool {
+    private let session: URLSession
+    init(session: URLSession = .shared) { self.session = session }
+
+    let name = "my_api_call"
+    let description = "..."
+    let inputSchema: JSONSchema = .object(/* ... */)
+    let outputSchema: JSONSchema = .object(/* ... */)
+
+    func execute(input: [String: JSON]) async throws -> ToolResult {
+        guard let query = input["query"]?.string else {
+            throw ToolError.invalidInput
+        }
+
+        var components = URLComponents(string: "https://api.example.com/search")!
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+
+        let (data, response) = try await session.data(from: components.url!)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw ToolError.invalidInput
+        }
+
+        let decoded = try JSONDecoder().decode(MyAPIResponse.self, from: data)
+        return ToolResult(content: decoded.summary)
+    }
+}
+```
+
+See [Weather Tool](/docs/tools/weather-tool) for the complete, real version
+of this pattern.
+
+## Checklist for a production-quality tool
+
+- **Validate every input field explicitly** — don't force-unwrap `input[...]`.
+- **Give `description` enough detail** that the model reliably knows when
+  (and when not) to call the tool.
+- **Prefer a domain-specific error enum** over throwing generic errors for
+  distinguishable failure modes — it makes your tool's behavior easier to
+  test and reason about.
+- **Never let `execute(input:)` crash the process** — every failure path
+  should be a Swift `throws`, never a force-unwrap, force-try, or a
+  crash-on-invalid-input API (this is exactly the class of bug `MathTool`
+  used to have with `NSExpression` — see [MathTool](/docs/tools/math-tool)).
+- **If you'll use the tool with `FoundationProvider`**, remember it needs to
+  be registered with *both* `Agent(tools:)` and `FoundationProvider(tools:)`
+  — see [Foundation Provider](/docs/providers/foundation-models#tools-must-be-registered-twice).

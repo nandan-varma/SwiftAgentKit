@@ -1,0 +1,115 @@
+---
+title: Testing
+description: How SwiftAgentKit's own test suite is organized, and patterns for testing your own agents/tools.
+---
+
+## Running the test suite
+
+```bash
+swift test                                     # run everything
+swift test --filter AgentTests                 # run one test suite
+swift test --filter testHeaderUsesRawAPIKey    # run one test by name
+```
+
+Most of the suite requires no credentials. A few live-API/on-device tests
+are opt-in:
+
+```
+# .env.local (gitignored — never commit real keys)
+OPENAI_API_KEY=your-openai-api-key-here
+ANTHROPIC_API_KEY=your-anthropic-api-key-here
+```
+
+- `MathExpressionEvaluator`, `MathTool`, and `Agent`'s tool-execution/streaming
+  loop are tested against mock providers — fully offline.
+- `WeatherTool` is tested against the real, keyless Open-Meteo API — no
+  mocks, since it's free and always available.
+- `OpenAIProviderTests` / `AnthropicProviderTests` and the corresponding
+  cases in `AgentIntegrationTests` self-skip (`XCTSkip`) unless their
+  respective API key is present, and exercise real text generation, tool
+  calling (including the full multi-turn tool-result round trip), structured
+  output, and streaming against the live API.
+- `FoundationProviderTests` exercises the real on-device model and
+  self-skips unless run on a Mac with Apple Intelligence enabled.
+- `OpenAIProviderRequestShapeTests` / `AnthropicProviderRequestShapeTests`
+  verify request shape (headers, body JSON, tool/error round-tripping)
+  against an injected `URLProtocol`-backed mock `URLSession`, without a live
+  API key.
+
+<Callout title="Naming convention" type="info">
+  `*RequestShapeTests` = offline, mocked `URLSession`. The bare
+  `OpenAIProviderTests`/`AnthropicProviderTests` = live API calls.
+</Callout>
+
+## Testing your own code against SwiftAgentKit
+
+### Mock a LanguageModelProvider
+
+For deterministic tests of your own `Agent` usage — tool selection logic,
+max-iterations handling, error paths — implement `LanguageModelProvider`
+with a mock rather than hitting a real API:
+
+```swift
+final class MockProvider: LanguageModelProvider, @unchecked Sendable {
+    func generateText(messages: [Message], tools: [ToolDescriptor]?) async throws -> LLMResponse {
+        LLMResponse(content: "mock response")
+    }
+    func streamText(messages: [Message], tools: [ToolDescriptor]?) -> AsyncThrowingStream<LLMStreamChunk, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(LLMStreamChunk(text: "mock", isComplete: true))
+            continuation.finish()
+        }
+    }
+    func generateObject<T: Decodable & Sendable>(messages: [Message], outputSchema: JSONSchema, tools: [ToolDescriptor]?) async throws -> T {
+        throw ToolError.invalidInput
+    }
+}
+
+let agent = Agent(provider: MockProvider(), tools: [MathTool()], instructions: "Test")
+```
+
+To simulate the model requesting a tool call, return `toolCalls` from
+`generateText`:
+
+```swift
+func generateText(messages: [Message], tools: [ToolDescriptor]?) async throws -> LLMResponse {
+    LLMResponse(
+        content: "",
+        toolCalls: [ToolCall(id: "call-1", name: "calculate", arguments: ["expression": JSON("1+1")])]
+    )
+}
+```
+
+### Mock a URLSession for provider-level tests
+
+`OpenAIProvider` and `AnthropicProvider` both accept an injectable
+`session: URLSession` — override it with a `URLProtocol`-backed mock to
+verify request shape without hitting a live API. SwiftAgentKit's own
+`MockURLProtocol` (in its test target) is a useful reference implementation
+if you're testing code that wraps these providers directly.
+
+```swift
+let session = mockSession { request in
+    // inspect `request`, return a canned (HTTPURLResponse, Data)
+    jsonResponse(request.url!, body: ["choices": [["message": ["content": "ok"]]]])
+}
+let provider = try OpenAIProvider(apiKey: "test-key", session: session)
+```
+
+### Testing tools directly
+
+Tools are plain `Tool`-conforming types — call `execute(input:)` directly in
+tests, no `Agent` required:
+
+```swift
+func testMathTool() async throws {
+    let tool = MathTool()
+    let result = try await tool.execute(input: ["expression": "2 + 2"])
+    XCTAssertEqual(result.content, "Result: 4.0")
+}
+```
+
+If your tool calls a real, free, keyless API (like `WeatherTool` does), it's
+often more valuable to test against the real service than to mock it —
+mocking would only prove your code parses a response shape you invented
+yourself, not that it actually works.

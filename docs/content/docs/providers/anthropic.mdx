@@ -1,0 +1,120 @@
+---
+title: Anthropic
+description: Using SwiftAgentKit with Anthropic's Messages API.
+---
+
+## Setup
+
+```swift
+import SwiftAgentKit
+
+let provider = try AnthropicProvider(apiKey: "your-api-key")
+```
+
+```swift
+public init(
+    apiKey: String,
+    model: String = "claude-sonnet-5",
+    baseURL: URL? = nil,
+    timeout: TimeInterval = 30.0,
+    session: URLSession = .shared
+) throws
+```
+
+| Parameter | Description |
+|---|---|
+| `apiKey` | Your Anthropic API key. Throws `AnthropicError.invalidAPIKey` if empty. |
+| `model` | Defaults to `claude-sonnet-5`. Check Anthropic's current model listing for the best fit. |
+| `baseURL` | Override for proxying requests; defaults to `https://api.anthropic.com`. |
+| `timeout` | Per-request timeout, in seconds. |
+| `session` | The `URLSession` to issue requests on. Override this in tests to inject a mock. |
+
+<Callout title="max_tokens is currently fixed at 1024" type="warn">
+  `AnthropicProvider` doesn't yet expose `max_tokens` as a configurable
+  parameter — every request sends `max_tokens: 1024`. Long responses may be
+  truncated. If you need this configurable, it's a small addition to
+  `AnthropicProvider.swift`.
+</Callout>
+
+## How messages map to the Messages API
+
+Anthropic's Messages API has a specific shape that SwiftAgentKit's internal
+`Message` type gets translated into on every request:
+
+- `.system` messages are hoisted out of the `messages` array entirely and
+  sent as the top-level `system` request field — Anthropic doesn't support a
+  `"system"` role inside `messages`.
+- `.user`/`.assistant` messages become `role: "user"`/`role: "assistant"`
+  entries with `text` content blocks.
+- An `.assistant` message with `toolCalls` becomes an assistant turn
+  containing `tool_use` content blocks.
+- `.tool(id:content:)` messages are merged into a single `role: "user"` turn
+  containing `tool_result` content blocks, keyed by `tool_use_id`.
+
+You don't need to construct this shape yourself — it's handled by
+`Agent`'s use of the plain `Message` enum — but it's useful to know when
+debugging request payloads.
+
+## Tool calling
+
+Like OpenAI, Anthropic's Messages API hands control back to the caller —
+tool calls arrive as pending `LLMResponse.toolCalls`, and `Agent`'s loop
+executes them:
+
+```swift
+let agent = Agent(
+    provider: provider,
+    tools: [MathTool(), WeatherTool()],
+    instructions: "Use tools when appropriate."
+)
+
+let result = try await agent.respond(to: "Calculate 7 * 8 and tell me the weather in Paris")
+```
+
+## Structured output
+
+Anthropic's API doesn't have a first-class structured-output mode
+equivalent to OpenAI's `response_format`, so `generateObject` embeds the
+target JSON schema directly into the system prompt and asks the model to
+respond with matching JSON, then parses the response text:
+
+```swift
+let person: Person = try await provider.generateObject(
+    messages: [.user("Create a person named John who is 30 years old")],
+    outputSchema: schema,
+    tools: nil
+)
+```
+
+Because this relies on prompt instructions rather than an API-level
+guarantee, it's less reliable than OpenAI's structured output or
+`FoundationProvider`'s (which uses a real schema-constrained generation
+API). If a response doesn't parse, `generateObject` throws
+`AnthropicError.invalidResponseFormat`.
+
+## Streaming
+
+```swift
+for try await chunk in provider.streamText(messages: messages, tools: nil) {
+    print(chunk.text, terminator: "")
+    if chunk.isComplete { break }
+}
+```
+
+Streaming is text-only — tool-call deltas aren't surfaced through
+`LLMStreamChunk`.
+
+## Errors
+
+```swift
+public enum AnthropicError: Error, Sendable, Equatable {
+    case invalidAPIKey
+    case apiError(String)
+    case invalidResponseFormat(String)
+}
+```
+
+`apiError` wraps Anthropic's own error response
+(`{"type":"error","error":{"type":...,"message":...}}`) — the associated
+string is the message Anthropic returned. See
+[Error Handling](/docs/error-handling) for the full picture across all providers.

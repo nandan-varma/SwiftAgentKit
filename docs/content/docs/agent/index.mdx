@@ -1,0 +1,112 @@
+---
+title: Agent
+description: The actor that orchestrates conversations, tool calls, and context.
+---
+
+## Overview
+
+```swift
+public actor Agent {
+    public init(
+        provider: LanguageModelProvider,
+        tools: [Tool] = [],
+        instructions: String,
+        context: AgentContext = .init()
+    )
+
+    public func respond(
+        to input: String,
+        maxIterations: Int = 10
+    ) async throws -> AgentResponse
+
+    public func streamResponse(
+        to input: String,
+        maxIterations: Int = 10
+    ) -> AsyncThrowingStream<LLMStreamChunk, Error>
+}
+```
+
+| Parameter | Description |
+|---|---|
+| `provider` | The `LanguageModelProvider` backing this agent — `OpenAIProvider`, `AnthropicProvider`, or `FoundationProvider`. |
+| `tools` | Tools the model may call. Passed to the provider as `ToolDescriptor`s on every turn. |
+| `instructions` | The system prompt, sent as a `.system` message on every turn. |
+| `context` | Conversation history storage. Defaults to a fresh in-memory `AgentContext`. |
+
+`Agent` is an `actor`. Every call from outside needs `await`, including
+`streamResponse(to:)` — it isn't itself `async`, but actor-isolation still
+applies.
+
+## respond(to:maxIterations:)
+
+Sends `input` to the provider, executes any tool calls the model requests,
+feeds results back, and repeats until the model produces a final,
+tool-call-free answer (or `maxIterations` is exceeded).
+
+```swift
+let result = try await agent.respond(to: "What's 15 * 23?")
+print(result.content)       // final text
+print(result.toolResults)   // [ToolResult]? — non-nil if any tool ran
+```
+
+```swift
+public struct AgentResponse: Sendable {
+    public let content: String
+    public let toolResults: [ToolResult]?
+}
+```
+
+If the loop hits `maxIterations` without resolving, it throws
+`AgentError.maxIterationsExceeded(partial:)` — see
+[Error Handling](/docs/error-handling) for how to recover the partial work
+instead of losing it.
+
+## streamResponse(to:maxIterations:)
+
+Streams the model's reply incrementally as `LLMStreamChunk`s:
+
+```swift
+for try await chunk in await agent.streamResponse(to: "Tell me a short story") {
+    print(chunk.text, terminator: "")
+}
+```
+
+The streaming behavior depends on whether the agent has tools registered:
+
+- **No tools registered** — streams token-by-token as the provider generates
+  them (real incremental streaming, via `provider.streamText`).
+- **Tools registered** — a tool call can only be detected by inspecting a
+  *complete* response, so tool calls are resolved exactly like `respond(to:)`
+  (via `provider.generateText`, non-streamed), and the final answer is
+  delivered as a **single completing chunk** rather than re-requested as a
+  stream. This is a deliberate latency/cost tradeoff, not a bug — streaming
+  the same content twice would double the cost for no benefit.
+
+On hitting `maxIterations`, the stream fails with
+`AgentError.maxIterationsExceeded(partial:)`, same as `respond(to:)`.
+
+## The tool-execution loop
+
+Internally, both `respond` and `streamResponse` share a private
+`resolveTurn` method that:
+
+1. Builds the message list: `[.system(instructions)] + context.messages`.
+2. Calls `provider.generateText(messages:tools:)`.
+3. If `response.executedToolResults` is non-empty, records the results and
+   returns immediately (the provider already resolved everything — see
+   [Architecture](/docs/architecture) for why this happens).
+4. Else if `response.toolCalls` is non-empty, executes each one by matching
+   `ToolCall.name` against the registered `Tool`s, appends `.tool(id:content:)`
+   messages with the results, increments the iteration count, and loops.
+5. Else, records the final `.assistant` message and returns.
+
+If a tool's `execute(input:)` throws, the error is caught and turned into a
+`.tool` message containing `"Tool execution failed: \(error.localizedDescription)"`
+— the loop doesn't abort on a single tool failure, giving the model a chance
+to recover or explain the failure to the user.
+
+## Continue reading
+
+- [AgentContext](/docs/agent/context) — conversation history and custom persistence.
+- [Streaming](/docs/streaming) — a closer look at `streamResponse`.
+- [Error Handling](/docs/error-handling) — every error type `Agent` and its providers can throw.

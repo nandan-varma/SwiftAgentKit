@@ -1,0 +1,82 @@
+---
+title: MathTool
+description: Safe arithmetic expression evaluation.
+---
+
+## Overview
+
+```swift
+let tool = MathTool()
+// name: "calculate"
+// description: "Perform mathematical calculations"
+```
+
+`MathTool` evaluates arithmetic expressions given as a string — `"expression"` in,
+a computed `Double` result out.
+
+```swift
+let result = try await tool.execute(input: ["expression": "2 + 3 * 4"])
+print(result.content) // "Result: 14.0"
+```
+
+## Input / output schema
+
+```swift
+// inputSchema
+.object(
+    description: "Input for mathematical calculations",
+    properties: ["expression": .string(description: "Mathematical expression to evaluate")],
+    required: ["expression"]
+)
+
+// outputSchema
+.object(
+    description: "Calculation result",
+    properties: ["result": .number(description: "Computed value")],
+    required: ["result"]
+)
+```
+
+## Why not `NSExpression`?
+
+Earlier versions used `NSExpression(format:)` to evaluate expressions. That's
+a real safety problem: `NSExpression` raises an **uncatchable Objective-C
+exception** on malformed input — not a Swift `throws` error, an actual
+process-terminating trap. Since expressions passed to a tool often
+originate from LLM output, a slightly malformed expression could crash the
+host application.
+
+`MathTool` now delegates to `MathExpressionEvaluator`, a small hand-written
+recursive-descent parser:
+
+```swift
+struct MathExpressionEvaluator {
+    static func evaluate(_ expression: String) throws -> Double
+}
+```
+
+Supports `+ - * /`, parentheses, unary minus, and decimal numbers. Every
+failure mode — an unrecognized character, unbalanced parentheses, division
+by zero, an incomplete expression — is a genuine Swift `throws` error,
+mapped to `ToolError.invalidInput` by `MathTool.execute(input:)`. Malformed
+input can never crash the process.
+
+```swift
+// All of these throw ToolError.invalidInput instead of crashing:
+try await tool.execute(input: ["expression": "(2 + 3"])   // unbalanced parens
+try await tool.execute(input: ["expression": "2 +"])      // incomplete
+try await tool.execute(input: ["expression": "5 / 0"])    // division by zero
+try await tool.execute(input: ["expression": "2; print"]) // invalid characters
+```
+
+## Grammar
+
+```
+expression := term (('+'|'-') term)*
+term       := factor (('*'|'/') factor)*
+factor     := '-' factor | '+' factor | primary
+primary    := number | '(' expression ')'
+```
+
+The tokenizer *is* the input validation — there's no separate character
+allowlist to keep in sync with the grammar.

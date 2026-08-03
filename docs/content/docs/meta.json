@@ -1,0 +1,17 @@
+{
+  "title": "SwiftAgentKit",
+  "pages": [
+    "index",
+    "installation",
+    "quick-start",
+    "architecture",
+    "agent",
+    "tools",
+    "providers",
+    "streaming",
+    "structured-output",
+    "error-handling",
+    "testing",
+    "contributing"
+  ]
+}

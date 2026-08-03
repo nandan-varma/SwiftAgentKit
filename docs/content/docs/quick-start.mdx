@@ -1,0 +1,107 @@
+---
+title: Quick Start
+description: Build your first agent in a few minutes.
+---
+
+## Using OpenAI
+
+```swift
+import SwiftAgentKit
+
+let provider = try OpenAIProvider(apiKey: "your-api-key")
+let agent = Agent(
+    provider: provider,
+    tools: [WeatherTool(), MathTool()],
+    instructions: "You are a helpful assistant."
+)
+
+let result = try await agent.respond(to: "What's 5 times 7?")
+print(result.content)
+```
+
+`Agent` is an `actor`, so calling its methods from outside always needs
+`await` — including `respond(to:)`, which is also `throws`.
+
+## Using Anthropic
+
+```swift
+import SwiftAgentKit
+
+let provider = try AnthropicProvider(apiKey: "your-api-key")
+let agent = Agent(
+    provider: provider,
+    tools: [WeatherTool(), MathTool()],
+    instructions: "You are a helpful assistant."
+)
+
+let result = try await agent.respond(to: "What's the weather in Tokyo?")
+print(result.content)
+```
+
+## Using Apple's on-device model
+
+```swift
+import SwiftAgentKit
+
+// Tools must be registered with BOTH the provider and the agent — see
+// the Foundation Provider page for why.
+let weatherTool = WeatherTool()
+let mathTool = MathTool()
+
+let provider = try FoundationProvider(tools: [weatherTool, mathTool])
+let agent = Agent(
+    provider: provider,
+    tools: [weatherTool, mathTool],
+    instructions: "You are a helpful assistant."
+)
+
+let result = try await agent.respond(to: "What's 5 times 7?")
+print(result.content)
+```
+
+`FoundationProvider` throws `FoundationModelsError.modelUnavailable` if
+Apple Intelligence isn't enabled on the current device — no network call
+happens, and no API key is needed.
+
+## Inspecting tool results
+
+`AgentResponse.toolResults` is populated whenever the model called at least
+one tool while producing its answer:
+
+```swift
+let result = try await agent.respond(to: "What's 15 * 23 and the weather in Paris?")
+print(result.content)
+
+if let toolResults = result.toolResults {
+    for toolResult in toolResults {
+        print("Tool executed: \(toolResult.content)")
+    }
+}
+```
+
+## Handling the iteration limit
+
+`respond(to:maxIterations:)` defaults to 10 tool-execution iterations. If the
+model keeps calling tools without producing a final answer, the call throws
+`AgentError.maxIterationsExceeded(partial:)` — the `partial` payload carries
+whatever content and tool results were already produced, so you don't lose
+completed work:
+
+```swift
+do {
+    let result = try await agent.respond(to: userInput, maxIterations: 5)
+    print(result.content)
+} catch AgentError.maxIterationsExceeded(let partial) {
+    print("Hit the iteration cap. Partial content: \(partial.content)")
+    print("Tool results so far: \(partial.toolResults ?? [])")
+}
+```
+
+See [Error Handling](/docs/error-handling) for the full list of error types.
+
+## What's next
+
+- [Architecture](/docs/architecture) — how `Agent`, providers, and tools fit together.
+- [Providers](/docs/providers) — per-provider setup, models, and quirks.
+- [Tools](/docs/tools) — using the built-in tools and writing your own.
+- [Streaming](/docs/streaming) — incremental responses via `Agent.streamResponse(to:)`.

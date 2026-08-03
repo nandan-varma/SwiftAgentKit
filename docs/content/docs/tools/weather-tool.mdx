@@ -1,0 +1,99 @@
+---
+title: WeatherTool
+description: Real current-weather lookups via the free Open-Meteo API.
+---
+
+## Overview
+
+```swift
+let tool = WeatherTool()
+// name: "get_weather"
+// description: "Get current weather for a location"
+```
+
+`WeatherTool` looks up real current weather conditions — no mock data, no
+API key required. It's backed by [Open-Meteo](https://open-meteo.com), a
+free, keyless weather API:
+
+1. **Geocode** the given location name via Open-Meteo's geocoding API
+   (`https://geocoding-api.open-meteo.com/v1/search`), resolving it to
+   coordinates and a canonical place name.
+2. **Fetch current conditions** for those coordinates
+   (`https://api.open-meteo.com/v1/forecast`) — temperature (°F), a WMO
+   weather code, relative humidity, and wind speed.
+3. Map the WMO code to a human-readable description (`"Clear sky"`,
+   `"Moderate rain"`, `"Thunderstorm with hail"`, etc.) per
+   [Open-Meteo's docs](https://open-meteo.com/en/docs).
+
+```swift
+let result = try await tool.execute(input: ["location": "Paris"])
+print(result.content)
+// "Weather in Paris: Clear sky, 68.4°F, 52% humidity, wind 11.2 km/h"
+```
+
+## Input / output schema
+
+```swift
+// inputSchema
+.object(
+    description: "Input for weather queries",
+    properties: ["location": .string(description: "City name")],
+    required: ["location"]
+)
+
+// outputSchema
+.object(
+    description: "Weather information",
+    properties: [
+        "weather": .string(description: "Weather description"),
+        "temperatureFahrenheit": .number(description: "Current temperature in Fahrenheit"),
+        "humidityPercent": .integer(description: "Relative humidity percentage"),
+        "windSpeedKmh": .number(description: "Wind speed in km/h"),
+        "resolvedLocation": .string(description: "The geocoded location name")
+    ],
+    required: ["weather"]
+)
+```
+
+`result.structuredOutput` and `result.data` both carry all five fields —
+useful if you want to read, say, the raw temperature without parsing
+`content`:
+
+```swift
+let result = try await tool.execute(input: ["location": "Tokyo"])
+if let temp = result.structuredOutput?["temperatureFahrenheit"].double {
+    print("It's \(temp)°F in Tokyo")
+}
+```
+
+## Errors
+
+```swift
+public enum WeatherToolError: Error, Sendable, Equatable {
+    case locationNotFound(String)
+    case apiError(String)
+}
+```
+
+- `locationNotFound(_:)` — Open-Meteo's geocoding search returned no results
+  for the given location string.
+- `apiError(_:)` — either API call returned a non-2xx HTTP response.
+
+`ToolError.invalidInput` is still thrown for a missing/empty `"location"`
+input, same as other tools.
+
+```swift
+do {
+    _ = try await tool.execute(input: ["location": "not a real place"])
+} catch WeatherToolError.locationNotFound(let query) {
+    print("Couldn't find: \(query)")
+}
+```
+
+## Testability
+
+`WeatherTool.init(session: URLSession = .shared)` accepts an injectable
+session, consistent with `OpenAIProvider`/`AnthropicProvider` — override it
+if you need to test against a mock in your own code. SwiftAgentKit's own
+test suite for `WeatherTool` calls the real Open-Meteo API directly (it's
+free and doesn't require credentials), rather than mocking it.

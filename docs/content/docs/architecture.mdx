@@ -1,0 +1,124 @@
+---
+title: Architecture
+description: How Agent, providers, and tools fit together.
+---
+
+## Core components
+
+| Component | Role |
+|---|---|
+| `Agent` | An `actor` that orchestrates conversations between the caller, a `LanguageModelProvider`, and a set of `Tool`s. |
+| `LanguageModelProvider` | Protocol every LLM backend implements: `generateText`, `streamText`, `generateObject`. |
+| `Tool` | Protocol for a model-callable function, described by a `JSONSchema` and backed by an `execute(input:)` implementation. |
+| `AgentContext` | Holds conversation history (`[Message]`) behind a pluggable `ContextStore`. |
+| `Message` | A type-safe conversation turn: `.system`, `.user`, `.assistant(content:toolCalls:)`, `.tool(id:content:)`. |
+
+## Data flow
+
+```
+User input → Agent → Provider.generateText → LLM
+                                              ↓
+                            Tool calls? ──── no ──→ final AgentResponse
+                                 │
+                                yes
+                                 │
+                    Agent executes each Tool.execute(input:)
+                                 │
+                     Results fed back as .tool messages
+                                 │
+                    Loop back to Provider.generateText
+              (until a final answer, or maxIterations is hit)
+```
+
+`Agent.respond(to:maxIterations:)` and `Agent.streamResponse(to:maxIterations:)`
+both funnel through a private `resolveTurn` loop: it repeatedly calls
+`provider.generateText`, executes any tool calls the response contains, feeds
+the results back into `AgentContext`, and repeats until a tool-call-free
+response is reached or `maxIterations` is exceeded.
+
+## Two ways a provider can report tool use
+
+`LLMResponse` — the return type of `generateText` — has **two distinct,
+non-overlapping channels** for tool activity. Understanding the difference is
+the single most important thing to know about this codebase's internals:
+
+```swift
+public struct LLMResponse: Sendable {
+    public let content: String
+
+    /// Tool calls the provider wants the Agent loop to execute itself.
+    /// Populated by OpenAI/Anthropic — their REST APIs hand control back
+    /// to the caller when the model wants to call a tool.
+    public let toolCalls: [ToolCall]?
+
+    /// Tools the provider already executed internally while resolving
+    /// this turn. Populated by FoundationProvider — Apple's
+    /// LanguageModelSession runs its own tool loop and only returns once
+    /// fully resolved, so there's nothing left pending for Agent to do.
+    public let executedToolResults: [ToolResult]?
+}
+```
+
+- **`toolCalls`** — pending calls. `Agent`'s loop looks up each tool by name,
+  calls `execute(input:)`, appends a `.tool(id:content:)` message with the
+  result, and loops back to the provider for another turn.
+- **`executedToolResults`** — already-resolved results. `Agent`'s loop
+  short-circuits immediately: it records the results and returns, since the
+  provider has already done everything there is to do.
+
+This split exists specifically because of how Apple's `FoundationModels`
+framework works — `LanguageModelSession.respond(to:)` invokes your tool
+adapters *internally* and only returns once its own tool loop is fully
+resolved. OpenAI and Anthropic's REST APIs, by contrast, always hand control
+back to the caller when a tool should be called. See
+[Foundation Provider](/docs/providers/foundation-models) for the full
+explanation.
+
+## The Tool protocol
+
+```swift
+public protocol Tool: Sendable {
+    var name: String { get }
+    var description: String { get }
+    var inputSchema: JSONSchema { get }
+    var outputSchema: JSONSchema { get }
+
+    func execute(input: [String: JSON]) async throws -> ToolResult
+}
+```
+
+`JSON` is [SwiftyJSON](https://github.com/SwiftyJSON/SwiftyJSON)'s dynamic
+value type — used throughout instead of `Any` so that `Tool`, `ToolCall`, and
+`ToolResult` can all conform to `Sendable`. `Tool.descriptor` (a default
+protocol extension) derives a schema-only `ToolDescriptor` from a `Tool`
+instance — this is what actually gets sent to a provider; the provider never
+sees your tool's executable body directly (except `FoundationProvider`,
+which needs it — again, see [Foundation Provider](/docs/providers/foundation-models)).
+
+## AgentContext and persistence
+
+```swift
+public protocol ContextStore: Sendable {
+    func save(messages: [Message]) async throws
+    func load() async throws -> [Message]
+}
+```
+
+`AgentContext` wraps a `ContextStore` (defaulting to an in-memory store) and
+persists the full message history after every append. Implement
+`ContextStore` yourself to back conversations with a file, database, or
+remote store — see [AgentContext](/docs/agent/context) for a worked example.
+
+## Why an actor?
+
+`Agent` holds mutable state (`AgentContext`) that's mutated across `await`
+suspension points during the tool-execution loop. Making `Agent` an `actor`
+gives you data-race safety for free under Swift's strict concurrency model,
+at the cost of needing `await` on every call from outside — including
+`streamResponse(to:)`, which isn't itself `async` but is still actor-isolated:
+
+```swift
+for try await chunk in await agent.streamResponse(to: "Tell me a story") {
+    print(chunk.text, terminator: "")
+}
+```

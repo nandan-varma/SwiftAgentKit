@@ -1,0 +1,124 @@
+---
+title: AgentContext
+description: Conversation history and pluggable persistence.
+---
+
+## Overview
+
+```swift
+public actor AgentContext {
+    public private(set) var messages: [Message]
+
+    public init(store: ContextStore = InMemoryStore())
+    public func addMessage(_ message: Message) async
+    public func load() async throws
+}
+```
+
+`AgentContext` is an `actor` that holds the running list of `Message`s for a
+conversation, and mirrors every append to a `ContextStore`. `Agent` reads
+`context.messages` before every provider call and appends to it after every
+turn — you generally don't need to touch `AgentContext` directly unless
+you're implementing persistence or inspecting history.
+
+```swift
+let agent = Agent(
+    provider: provider,
+    tools: [],
+    instructions: "You are a helpful assistant.",
+    context: AgentContext() // in-memory by default
+)
+```
+
+## ContextStore
+
+```swift
+public protocol ContextStore: Sendable {
+    func save(messages: [Message]) async throws
+    func load() async throws -> [Message]
+}
+```
+
+The built-in `InMemoryStore` is the default and keeps history only for the
+lifetime of the process. Implement `ContextStore` yourself to persist
+conversations anywhere — a file, `UserDefaults`, SQLite, a remote API.
+
+<Callout title="save() errors are swallowed" type="warn">
+  `AgentContext.addMessage(_:)` calls `try? await store.save(messages:)` — a
+  failing `save()` will not throw or otherwise surface to the caller. If your
+  store needs to report save failures, log them from inside `save()` itself.
+</Callout>
+
+<Callout title="load() is not automatic" type="warn">
+  Passing a pre-populated `store:` to `AgentContext.init` does **not**
+  automatically restore prior history — `messages` starts empty regardless.
+  Call `try await context.load()` yourself after construction if you want to
+  resume a previous conversation.
+</Callout>
+
+## Example: file-backed persistence
+
+`Message` doesn't conform to `Codable` itself, so a `ContextStore` needs a
+small `Codable` DTO to serialize through. This example round-trips
+`.system`/`.user`/`.assistant`/`.tool` content and tool-call IDs; extend the
+DTO if you also need to persist tool-call arguments.
+
+```swift
+private struct CodableMessage: Codable {
+    enum Kind: String, Codable { case system, user, assistant, tool }
+    let kind: Kind
+    let content: String
+    let toolCallId: String?
+}
+
+final class FileStore: ContextStore {
+    private let fileURL: URL
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    func save(messages: [Message]) async throws {
+        let encodable = messages.map { message -> CodableMessage in
+            switch message {
+            case .system(let content):
+                return CodableMessage(kind: .system, content: content, toolCallId: nil)
+            case .user(let content):
+                return CodableMessage(kind: .user, content: content, toolCallId: nil)
+            case .assistant(let content, _):
+                return CodableMessage(kind: .assistant, content: content, toolCallId: nil)
+            case .tool(let id, let content):
+                return CodableMessage(kind: .tool, content: content, toolCallId: id)
+            }
+        }
+        let data = try JSONEncoder().encode(encodable)
+        try data.write(to: fileURL)
+    }
+
+    func load() async throws -> [Message] {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return []
+        }
+        let data = try Data(contentsOf: fileURL)
+        let decoded = try JSONDecoder().decode([CodableMessage].self, from: data)
+        return decoded.map { entry in
+            switch entry.kind {
+            case .system: return .system(entry.content)
+            case .user: return .user(entry.content)
+            case .assistant: return .assistant(content: entry.content, toolCalls: nil)
+            case .tool: return .tool(id: entry.toolCallId ?? "", content: entry.content)
+            }
+        }
+    }
+}
+
+let context = AgentContext(store: FileStore(fileURL: conversationURL))
+try await context.load() // restore any prior history before use
+
+let agent = Agent(
+    provider: provider,
+    tools: [],
+    instructions: "You are a helpful assistant.",
+    context: context
+)
+```

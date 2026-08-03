@@ -1,0 +1,167 @@
+---
+title: Foundation Models
+description: Real on-device inference via Apple's FoundationModels framework.
+---
+
+## Setup
+
+```swift
+import SwiftAgentKit
+
+let weatherTool = WeatherTool()
+let mathTool = MathTool()
+
+let provider = try FoundationProvider(tools: [weatherTool, mathTool])
+let agent = Agent(
+    provider: provider,
+    tools: [weatherTool, mathTool],
+    instructions: "You are a helpful assistant."
+)
+```
+
+```swift
+public init(tools: [Tool] = []) throws
+```
+
+No API key, no network call — `FoundationProvider` runs entirely on-device
+via Apple's `FoundationModels` framework, available starting macOS/iOS 26.
+
+<Callout title="Requires Apple Intelligence" type="warn">
+  `FoundationProvider` throws `FoundationModelsError.modelUnavailable(_:)` if
+  Apple Intelligence isn't enabled, the device isn't eligible, or the model
+  isn't ready yet. Check System Settings → Apple Intelligence & Siri if you
+  hit this at runtime.
+</Callout>
+
+## Tools must be registered twice
+
+This is the single most important thing to know about `FoundationProvider`:
+**the tools you pass to `Agent(tools:)` and the tools you pass to
+`FoundationProvider(tools:)` must match.**
+
+```swift
+// ✅ Correct — both lists include the same tools
+let provider = try FoundationProvider(tools: [weatherTool, mathTool])
+let agent = Agent(provider: provider, tools: [weatherTool, mathTool], instructions: "...")
+
+// ❌ Silent bug — weatherTool is offered to the model (via Agent's descriptor)
+// but FoundationProvider has no executable Tool registered for it, so the
+// model can never actually call it.
+let provider = try FoundationProvider(tools: [mathTool])
+let agent = Agent(provider: provider, tools: [weatherTool, mathTool], instructions: "...")
+```
+
+Why two lists at all? `LanguageModelProvider.generateText` only receives
+`[ToolDescriptor]` — schema metadata, no executable code — because OpenAI
+and Anthropic never need more than that (`Agent`'s loop executes tools
+externally, using its own `[Tool]` array). `FoundationProvider` is
+different: Apple's on-device session calls tools **internally**, so it needs
+the real, executable `Tool` — not just its schema — which is why it keeps
+its own registry, built from the `tools:` passed to its initializer.
+
+A future major version may unify this by having `LanguageModelProvider`
+accept `[Tool]` uniformly instead of `[ToolDescriptor]`.
+
+## How tool calls are reported
+
+Apple's `LanguageModelSession.respond(to:)` runs its own internal tool loop:
+when the model wants to call a tool, the framework invokes it directly and
+only returns once the whole exchange is fully resolved. There's no "pending
+call" to hand back to `Agent`, unlike OpenAI/Anthropic. So instead of
+`LLMResponse.toolCalls`, `FoundationProvider` populates
+`LLMResponse.executedToolResults` — results of tools **already executed** —
+and `Agent`'s loop short-circuits immediately when it sees this populated,
+since there's nothing left to do. See
+[Architecture](/docs/architecture#two-ways-a-provider-can-report-tool-use)
+for the full explanation.
+
+```swift
+let result = try await agent.respond(to: "What's the weather in Tokyo?")
+// result.toolResults is populated from executedToolResults under the hood —
+// from the caller's perspective, Agent.respond behaves identically
+// regardless of which provider produced the result.
+```
+
+## Session-per-call bridging
+
+SwiftAgentKit's `LanguageModelProvider` protocol is stateless per call — it
+always receives the full `[Message]` history, matching the REST-API shape of
+OpenAI/Anthropic. Apple's `LanguageModelSession`, by contrast, is a stateful
+conversation object.
+
+`FoundationProvider` bridges this by creating a **fresh session on every
+call**. The most recent `.system` message(s) become the session's
+`instructions`, and every other message (prior user/assistant turns, and any
+`.tool` results) is flattened into plain text and passed as the prompt —
+for example:
+
+```
+User: What's 7 * 8?
+Assistant: Let me calculate that.
+Tool result (call-1): Result: 56.0
+User: Thanks, now what's the weather in Tokyo?
+```
+
+This is a **deliberate simplification, not an oversight** — reconstructing
+Apple's `Transcript` type from an arbitrary `[Message]` array isn't a
+supported mapping. In practice, this means Apple's model sees conversation
+history as text rather than as structured turns, which is slightly less
+precise than the other two providers but works well for typical multi-turn
+conversations.
+
+## Structured output
+
+Unlike OpenAI and Anthropic (which either use a schema-aware API endpoint or
+embed the schema in the prompt as text), `FoundationProvider.generateObject`
+uses FoundationModels' **real** structured-generation API —
+`session.respond(to:schema:)` — built from the same `DynamicGenerationSchema`
+machinery used for tool arguments. This is the most reliable of the three
+providers' structured-output implementations, since the framework itself
+constrains generation to match the schema rather than relying on the model
+choosing to comply.
+
+```swift
+let person: Person = try await provider.generateObject(
+    messages: [.user("Create a person named John who is 30 years old")],
+    outputSchema: schema,
+    tools: nil
+)
+```
+
+## How tool schemas are bridged
+
+SwiftAgentKit's `Tool.inputSchema` is a runtime `JSONSchema` value, not a
+compile-time `@Generable` struct (the type Apple's `Tool` protocol normally
+expects). To bridge this, `FoundationProvider` walks the schema's raw JSON
+representation (via `JSONSchema.asJSON()`) and builds an equivalent
+`DynamicGenerationSchema` at runtime — Apple's own supported mechanism for
+exactly this kind of dynamic-schema scenario (also used for bridging MCP
+tools, for example). This happens transparently; you don't need to do
+anything differently when writing a `Tool` meant to work with
+`FoundationProvider` versus the other providers.
+
+## Streaming
+
+```swift
+for try await chunk in provider.streamText(messages: messages, tools: nil) {
+    print(chunk.text, terminator: "")
+}
+```
+
+Backed by `session.streamResponse(to:)`, diffing each cumulative snapshot
+into incremental `LLMStreamChunk`s.
+
+## Errors
+
+```swift
+public enum FoundationModelsError: Error, Sendable {
+    case modelUnavailable(String)
+    case invalidResponseFormat(String)
+    case unsupportedPlatform
+}
+```
+
+`unsupportedPlatform` is thrown if `FoundationProvider` is used in a build
+where the `FoundationModels` framework isn't available at all (the
+Foundation-specific code is compiled behind `#if canImport(FoundationModels)`).
+See [Error Handling](/docs/error-handling) for the full picture across all providers.

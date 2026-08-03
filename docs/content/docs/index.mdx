@@ -1,0 +1,76 @@
+---
+title: Introduction
+description: A Swift-native SDK for building autonomous AI agents.
+---
+
+## What is SwiftAgentKit?
+
+SwiftAgentKit is a Swift-native SDK for building autonomous AI agents that call
+language models, execute tools, and maintain conversation context. It's
+inspired by Vercel's AI SDK, but designed specifically for Swift's concurrency
+model and type system — `Agent` is an `actor`, providers and tools are
+`Sendable`, and every public API is `async`/`throws` rather than
+callback-based.
+
+It ships with three production-ready `LanguageModelProvider` implementations:
+
+- **OpenAI** — Chat Completions API, including tool calling and structured output.
+- **Anthropic** — Messages API, including tool calling and structured output.
+- **Apple Foundation Models** — real on-device inference via Apple's
+  `FoundationModels` framework (macOS/iOS 26+, requires Apple Intelligence).
+
+and two built-in tools you can use immediately or use as a reference for
+writing your own: `MathTool` (safe arithmetic expression evaluation) and
+`WeatherTool` (real current-weather lookups via the free
+[Open-Meteo](https://open-meteo.com) API).
+
+## Core concepts
+
+<Cards>
+  <Card title="Agent" href="/docs/agent">
+    An actor that orchestrates conversations: it sends messages to a
+    provider, executes any tool calls the model requests, feeds results back,
+    and repeats until a final answer is produced.
+  </Card>
+  <Card title="LanguageModelProvider" href="/docs/providers">
+    The protocol every LLM backend implements — `generateText`, `streamText`,
+    `generateObject`. Swap providers without touching your `Agent` code.
+  </Card>
+  <Card title="Tool" href="/docs/tools">
+    A function the model can call, described by a JSON schema so any
+    provider can offer it. Built-in tools and custom tools implement the
+    same protocol.
+  </Card>
+  <Card title="AgentContext" href="/docs/agent/context">
+    Holds conversation history behind a pluggable `ContextStore`, so you can
+    persist conversations to disk, a database, or keep them in memory.
+  </Card>
+</Cards>
+
+## Why SwiftAgentKit?
+
+- **Type safety.** Messages, tool calls, and results are modeled as Swift
+  enums and structs, not untyped dictionaries — the compiler catches
+  mistakes that would otherwise surface at runtime.
+- **Structured concurrency.** `Agent` is an `actor`; every provider and tool
+  method is `async`. No completion handlers, no manual locking.
+- **One agent loop, three backends.** The same `Agent`/`Tool` code runs
+  against OpenAI, Anthropic, or Apple's on-device model — only the
+  `LanguageModelProvider` you pass in changes.
+- **No mocks in production paths.** Every provider talks to a real API, and
+  the built-in tools call real services. Nothing in `Sources/` is a stub you
+  need to replace before shipping.
+
+## Requirements
+
+- macOS 26+ / iOS 26+ — see [Installation](/docs/installation) for why this
+  is a hard requirement, not just a preference.
+- Swift 6.2+
+- An OpenAI and/or Anthropic API key, if you use those providers.
+- Apple Intelligence enabled, if you use the on-device Foundation provider.
+
+## Next steps
+
+Head to [Installation](/docs/installation) to add SwiftAgentKit to your
+project, or jump straight to the [Quick Start](/docs/quick-start) for a
+working example.

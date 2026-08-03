@@ -1,0 +1,80 @@
+---
+title: Overview
+description: The LanguageModelProvider protocol and how to choose a backend.
+---
+
+## The protocol
+
+Every backend implements `LanguageModelProvider`:
+
+```swift
+public protocol LanguageModelProvider: Sendable {
+    func generateText(
+        messages: [Message],
+        tools: [ToolDescriptor]?
+    ) async throws -> LLMResponse
+
+    func streamText(
+        messages: [Message],
+        tools: [ToolDescriptor]?
+    ) -> AsyncThrowingStream<LLMStreamChunk, Error>
+
+    func generateObject<T: Decodable & Sendable>(
+        messages: [Message],
+        outputSchema: JSONSchema,
+        tools: [ToolDescriptor]?
+    ) async throws -> T
+}
+```
+
+Each call receives the **full conversation history** (`messages`), matching
+the stateless request/response shape of a typical LLM REST API — even
+`FoundationProvider`, which wraps a stateful session, reconstructs whatever
+state it needs from that history on every call (see
+[Foundation Provider](/docs/providers/foundation-models)).
+
+`Agent` only depends on this protocol, so switching providers is a one-line
+change:
+
+```swift
+// let provider = try OpenAIProvider(apiKey: openAIKey)
+let provider = try AnthropicProvider(apiKey: anthropicKey)
+
+let agent = Agent(provider: provider, tools: tools, instructions: instructions)
+```
+
+## Comparison
+
+| | OpenAI | Anthropic | Foundation |
+|---|---|---|---|
+| Backend | Chat Completions API | Messages API | Apple `FoundationModels` (on-device) |
+| Auth | API key | API key | None (Apple Intelligence must be enabled) |
+| Tool calling | ✅ `toolCalls` (pending) | ✅ `toolCalls` (pending) | ✅ `executedToolResults` (already run) |
+| Structured output | ✅ `response_format: json_schema` | ✅ schema embedded in prompt | ✅ real `respond(to:schema:)` API |
+| Streaming | ✅ text only | ✅ text only | ✅ text only |
+| Network required | Yes | Yes | No |
+| Cost | Per-token billing | Per-token billing | Free (on-device) |
+
+Streaming is **text-only for every provider** — incremental tool-call deltas
+aren't currently surfaced through `LLMStreamChunk`.
+
+## Picking a provider
+
+- **OpenAI / Anthropic** — use these for server-side apps, cross-platform
+  consistency, or when you need the most capable available models. Requires
+  an API key and network access; costs scale with usage.
+- **Foundation (on-device)** — use this for iOS/macOS apps that need
+  zero-cost, offline-capable, privacy-preserving inference. Model capability
+  is more limited than frontier cloud models, and it's Apple-platform only.
+
+Nothing stops you from using more than one — construct multiple `Agent`
+instances, or pick a provider at runtime based on network reachability or
+user preference.
+
+## Continue reading
+
+<Cards>
+  <Card title="OpenAI" href="/docs/providers/openai" />
+  <Card title="Anthropic" href="/docs/providers/anthropic" />
+  <Card title="Foundation Models" href="/docs/providers/foundation-models" />
+</Cards>

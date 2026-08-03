@@ -1,0 +1,82 @@
+---
+title: The Tool Protocol
+description: How tools are described and executed.
+---
+
+## Protocol
+
+```swift
+public protocol Tool: Sendable {
+    var name: String { get }
+    var description: String { get }
+    var inputSchema: JSONSchema { get }
+    var outputSchema: JSONSchema { get }
+
+    func execute(input: [String: JSON]) async throws -> ToolResult
+}
+```
+
+| Member | Purpose |
+|---|---|
+| `name` | A short, stable identifier the model uses to invoke this tool (e.g. `"calculate"`). |
+| `description` | Shown to the model to help it decide when to call this tool. Be specific — vague descriptions lead to the model either never calling the tool or calling it inappropriately. |
+| `inputSchema` | The `JSONSchema` `execute(input:)`'s `input` dictionary must satisfy. Sent to the provider so the model knows what arguments to supply. |
+| `outputSchema` | The schema of the tool's result, for documentation purposes — not currently enforced on `execute(input:)`'s return value. |
+| `execute(input:)` | Runs the tool. Throws `ToolError.invalidInput` (or a tool-specific error) if `input` doesn't contain what's needed. |
+
+`JSON` is [SwiftyJSON](https://github.com/SwiftyJSON/SwiftyJSON)'s dynamic
+value type — used instead of `Any` so `Tool`, `ToolCall`, and `ToolResult`
+can all conform to `Sendable`.
+
+## ToolResult
+
+```swift
+public struct ToolResult: Sendable {
+    public let content: String
+    public let data: [String: JSON]?
+    public let structuredOutput: JSON?
+
+    public init(content: String, data: [String: JSON]? = nil, structuredOutput: JSON? = nil)
+}
+```
+
+- `content` — human/model-readable text, fed back into the conversation as a
+  `.tool(id:content:)` message. This is what the model actually reads to
+  continue the conversation.
+- `data` — optional structured fields, for callers that want typed access
+  beyond `content` (e.g. reading `result.data?["temperatureFahrenheit"]?.double`
+  directly instead of parsing `content`).
+- `structuredOutput` — the same information as a single `JSON` value, shaped
+  per `outputSchema`.
+
+## The descriptor
+
+`Tool` has one default protocol extension:
+
+```swift
+extension Tool {
+    public var descriptor: ToolDescriptor {
+        ToolDescriptor(name: name, description: description, inputSchema: inputSchema, outputSchema: outputSchema)
+    }
+}
+```
+
+`ToolDescriptor` is the schema-only projection actually sent to a
+`LanguageModelProvider` — providers never see your tool's executable body
+(with one exception: `FoundationProvider`, which needs the real `Tool` to
+call back into — see [Foundation Provider](/docs/providers/foundation-models)).
+`Agent.respond`/`streamResponse` compute `tools.map { $0.descriptor }` on
+every turn automatically; you don't call `.descriptor` yourself in normal use.
+
+## Built-in tools
+
+<Cards>
+  <Card title="MathTool" href="/docs/tools/math-tool">
+    Safe arithmetic expression evaluation via a hand-written recursive-descent parser.
+  </Card>
+  <Card title="WeatherTool" href="/docs/tools/weather-tool">
+    Real current-weather lookups via the free, keyless Open-Meteo API.
+  </Card>
+</Cards>
+
+Or jump to [Custom Tools](/docs/tools/custom-tools) to write your own.

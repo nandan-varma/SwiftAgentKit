@@ -1,0 +1,66 @@
+---
+title: Contributing
+description: Development setup, code style, and how to submit changes.
+---
+
+## Development setup
+
+```bash
+git clone https://github.com/nandan-varma/SwiftAgentKit.git
+cd SwiftAgentKit
+swift build
+swift test
+```
+
+Requires macOS 26+ with Xcode 26+ — `Package.swift` targets
+`.macOS(.v26)`/`.iOS(.v26)` because `FoundationProvider` links against
+Apple's real `FoundationModels` framework, which is only available starting
+with that OS version.
+
+## Workflow
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/your-feature`.
+3. Make your changes and run `swift test`.
+4. Commit: `git commit -am 'Add your feature'`.
+5. Push: `git push origin feature/your-feature`.
+6. Open a pull request.
+
+## Code style
+
+- Follow the Swift API Design Guidelines.
+- Use Swift 6 concurrency features — `Agent` is an `actor`; providers and
+  tools are `Sendable`. Don't reach for locks or `@unchecked Sendable`
+  unless there's a concrete reason (as with `InMemoryStore`, whose internal
+  mutable state is actually actor-isolated by its only caller).
+- Add tests for new features — see [Testing](/docs/testing) for the
+  project's offline-vs-live-API test conventions, and prefer testing
+  against a real free service over mocking when one's available (as
+  `WeatherTool`'s tests do).
+- Update documentation for API changes — both the root `README.md`, this
+  docs site, and DocC-style `///` comments on public symbols.
+
+## CI
+
+GitHub Actions builds and tests on a `macos-26` runner (Xcode 26.x
+preinstalled), so `FoundationProvider` compiles against the real SDK in CI —
+though its live-model tests self-skip there, since hosted runners don't have
+Apple Intelligence enabled. Live OpenAI/Anthropic tests only run in CI if
+the corresponding repository secret (`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`) is
+configured; otherwise they self-skip via `XCTSkip`, same as locally.
+
+## Generating API documentation
+
+The package includes a DocC catalog (`Sources/SwiftAgentKit/Documentation.docc`)
+via the `swift-docc-plugin` dependency:
+
+```bash
+swift package generate-documentation
+```
+
+## Getting help
+
+- Check existing [GitHub Issues](https://github.com/nandan-varma/SwiftAgentKit/issues).
+- When filing a new issue, include your Swift version (`swift --version`),
+  macOS/iOS version, the full error message/stack trace, and a minimal
+  reproducing example.

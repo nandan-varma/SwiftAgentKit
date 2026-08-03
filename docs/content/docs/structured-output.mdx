@@ -1,0 +1,105 @@
+---
+title: Structured Output
+description: Decoding model responses directly into your own Codable types.
+---
+
+## Overview
+
+Every provider implements `generateObject`, which decodes the model's
+response directly into a `Decodable & Sendable` type you specify, guided by
+a `JSONSchema`:
+
+```swift
+func generateObject<T: Decodable & Sendable>(
+    messages: [Message],
+    outputSchema: JSONSchema,
+    tools: [ToolDescriptor]?
+) async throws -> T
+```
+
+```swift
+import JSONSchema
+
+struct Person: Codable {
+    let name: String
+    let age: Int
+}
+
+let schema = JSONSchema.object(
+    description: "Person information",
+    properties: [
+        "name": .string(description: "Person's name"),
+        "age": .integer(description: "Person's age")
+    ],
+    required: ["name", "age"]
+)
+
+let person: Person = try await provider.generateObject(
+    messages: [.user("Create a person named John who is 30 years old")],
+    outputSchema: schema,
+    tools: nil
+)
+```
+
+`generateObject` is a method on `LanguageModelProvider` directly — it isn't
+exposed through `Agent`, so you call it on your provider instance, not on an
+`Agent`.
+
+## How each provider implements it
+
+The three providers take genuinely different approaches — worth
+understanding since it affects reliability:
+
+| Provider | Mechanism |
+|---|---|
+| **OpenAI** | `response_format: json_schema` — the schema is sent as part of the API request; falls back to prose-JSON parsing if the model/account doesn't support structured output. |
+| **Anthropic** | The schema is embedded as text in the system prompt, asking the model to respond with matching JSON — there's no API-level structured-output guarantee. |
+| **Foundation** | Uses Apple's real `session.respond(to:schema:)` structured-generation API — the framework itself constrains generation, making this the most reliable of the three. |
+
+See each provider's page — [OpenAI](/docs/providers/openai#structured-output),
+[Anthropic](/docs/providers/anthropic#structured-output),
+[Foundation Models](/docs/providers/foundation-models#structured-output) —
+for details and caveats specific to that backend.
+
+## Designing your schema carefully
+
+<Callout title="Only `required` fields are guaranteed" type="warn">
+  Across all three providers, a field you don't mark as `required` in the
+  `JSONSchema` may legitimately be omitted from the model's response. If the
+  corresponding Swift property on your target type is non-optional, decoding
+  will fail with a `keyNotFound`/`valueNotFound` error. Either mark every
+  field you truly need as `required`, or make the corresponding Swift
+  property `Optional`.
+</Callout>
+
+```swift
+// If "age" isn't required, decode into an optional to avoid a decode
+// failure when the model omits it:
+struct Person: Codable {
+    let name: String
+    let age: Int?
+}
+```
+
+## Error handling
+
+Each provider throws its own error type on a decode failure:
+
+```swift
+do {
+    let person: Person = try await provider.generateObject(
+        messages: messages,
+        outputSchema: schema,
+        tools: nil
+    )
+} catch OpenAIError.invalidResponseFormat(let reason) {
+    print("OpenAI response didn't match: \(reason)")
+} catch AnthropicError.invalidResponseFormat(let reason) {
+    print("Anthropic response didn't match: \(reason)")
+} catch FoundationModelsError.invalidResponseFormat(let reason) {
+    print("On-device response didn't match: \(reason)")
+}
+```
+
+See [Error Handling](/docs/error-handling) for the complete list of error
+types across the SDK.

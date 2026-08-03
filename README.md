@@ -14,6 +14,7 @@ A Swift-native SDK for building autonomous AI agents that can interact with lang
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
 - [Examples](#examples)
+- [Streaming](#streaming)
 - [Testing](#testing)
 - [Requirements](#requirements)
 - [Security](#security)
@@ -50,7 +51,7 @@ Then add `"SwiftAgentKit"` to your target's dependencies.
 import SwiftAgentKit
 
 // Using OpenAI
-let openAIProvider = OpenAIProvider(apiKey: "your-api-key")
+let openAIProvider = try OpenAIProvider(apiKey: "your-api-key")
 let agent = Agent(
     provider: openAIProvider,
     tools: [WeatherTool(), MathTool()],
@@ -60,8 +61,10 @@ let agent = Agent(
 let result = try await agent.respond(to: "What's 5 times 7?")
 print(result.content)
 
-// Using Foundation Models (macOS 15+)
-let foundationProvider = try FoundationProvider()
+// Using Foundation Models (real on-device Apple Intelligence, macOS/iOS 26+).
+// Tools must be registered with the provider as well as the agent — see
+// FoundationProvider's docs for why.
+let foundationProvider = try FoundationProvider(tools: [WeatherTool(), MathTool()])
 let agent2 = Agent(
     provider: foundationProvider,
     tools: [WeatherTool(), MathTool()],
@@ -90,15 +93,24 @@ User Input → Agent → Provider → LLM → Tool Calls → Tool Execution → 
 | Provider | Status | Features |
 |----------|--------|----------|
 | OpenAI | ✅ Full | Text generation, tool calls, structured output |
-| Anthropic | ⚠️ Partial | Text generation (tool calls planned) |
-| Foundation | ✅ Basic | Text generation (Apple Intelligence) |
+| Anthropic | ✅ Full | Text generation, tool calls (Messages API), structured output |
+| Foundation | ✅ Full | Real on-device Apple Intelligence (macOS/iOS 26+), tool calls, structured output |
+
+Notes:
+- `FoundationProvider` builds a fresh model session per call and flattens prior
+  conversation turns into the prompt text, since it bridges SwiftAgentKit's
+  stateless provider calls onto Apple's stateful `LanguageModelSession` — this
+  is a deliberate simplification, not a bug. It also requires tools to be
+  registered with the provider itself, not just the `Agent` — see its docs.
+- Streaming (`streamText`/`Agent.streamResponse`) is text-only for every
+  provider — incremental tool-call deltas aren't currently surfaced.
 
 ## API Reference
 
 ### Agent
 
 ```swift
-public final class Agent {
+public actor Agent {
     public init(
         provider: LanguageModelProvider,
         tools: [Tool] = [],
@@ -110,6 +122,11 @@ public final class Agent {
         to input: String,
         maxIterations: Int = 10
     ) async throws -> AgentResponse
+
+    public func streamResponse(
+        to input: String,
+        maxIterations: Int = 10
+    ) -> AsyncThrowingStream<LLMStreamChunk, Error>
 }
 ```
 
@@ -119,10 +136,12 @@ public final class Agent {
 - `instructions`: System prompt defining agent behavior
 - `maxIterations`: Maximum tool execution loops (prevents infinite loops)
 
+`Agent` is an actor — calls from outside need `await` even where `respond`/`streamResponse` aren't otherwise asynchronous (e.g. `await agent.streamResponse(to:)`).
+
 ### LanguageModelProvider Protocol
 
 ```swift
-public protocol LanguageModelProvider {
+public protocol LanguageModelProvider: Sendable {
     func generateText(
         messages: [Message],
         tools: [ToolDescriptor]?
@@ -133,7 +152,7 @@ public protocol LanguageModelProvider {
         tools: [ToolDescriptor]?
     ) -> AsyncThrowingStream<LLMStreamChunk, Error>
 
-    func generateObject<T: Decodable>(
+    func generateObject<T: Decodable & Sendable>(
         messages: [Message],
         outputSchema: JSONSchema,
         tools: [ToolDescriptor]?
@@ -144,15 +163,17 @@ public protocol LanguageModelProvider {
 ### Tool Protocol
 
 ```swift
-public protocol Tool {
+public protocol Tool: Sendable {
     var name: String { get }
     var description: String { get }
     var inputSchema: JSONSchema { get }
     var outputSchema: JSONSchema { get }
 
-    func execute(input: [String: Any]) async throws -> ToolResult
+    func execute(input: [String: JSON]) async throws -> ToolResult
 }
 ```
+
+`JSON` is [SwiftyJSON](https://github.com/SwiftyJSON/SwiftyJSON)'s dynamic JSON value type, re-exported by SwiftAgentKit's dependencies.
 
 ### Built-in Tools
 
@@ -161,9 +182,13 @@ public protocol Tool {
 
 ### Error Types
 
-- `AgentError.maxIterationsExceeded`: Tool loop limit reached
+All error types are public and can be caught by name from outside the module:
+
+- `AgentError.maxIterationsExceeded(partial:)`: Tool loop limit reached — carries whatever content/tool results were already produced, so you don't lose completed work
 - `ToolError.invalidInput`: Invalid tool parameters
 - `OpenAIError.*`: OpenAI API specific errors
+- `AnthropicError.*`: Anthropic API specific errors
+- `FoundationModelsError.*`: On-device model unavailable, unsupported platform, or structured-output decode failures
 
 ## Examples
 
@@ -173,7 +198,7 @@ public protocol Tool {
 import SwiftAgentKit
 
 // Initialize provider
-let provider = OpenAIProvider(apiKey: "your-api-key")
+let provider = try OpenAIProvider(apiKey: "your-api-key")
 
 // Create agent with tools
 let agent = Agent(
@@ -210,16 +235,16 @@ struct CustomTool: Tool {
         ]
     )
 
-    func execute(input: [String: Any]) async throws -> ToolResult {
-        guard let value = input["value"] as? Int else {
+    func execute(input: [String: JSON]) async throws -> ToolResult {
+        guard let value = input["value"]?.int else {
             throw ToolError.invalidInput
         }
 
         let result = value * 2
         return ToolResult(
             content: "Result: \(result)",
-            data: ["result": result],
-            structuredOutput: ["result": result]
+            data: ["result": JSON(result)],
+            structuredOutput: JSON(["result": result])
         )
     }
 }
@@ -275,8 +300,9 @@ do {
             print("Tool executed: \(result.content)")
         }
     }
-} catch AgentError.maxIterationsExceeded {
+} catch AgentError.maxIterationsExceeded(let partial) {
     print("Agent exceeded maximum tool execution iterations")
+    print("Partial content so far: \(partial.content)")
 } catch ToolError.invalidInput {
     print("Invalid tool input provided")
 } catch {
@@ -310,38 +336,67 @@ struct Person: Codable {
 }
 ```
 
+## Streaming
+
+`Agent.streamResponse(to:)` streams the model's reply incrementally:
+
+```swift
+for try await chunk in await agent.streamResponse(to: "Tell me a short story") {
+    print(chunk.text, terminator: "")
+}
+```
+
+- If the agent has **no tools registered**, this streams token-by-token as the
+  model generates them.
+- If tools **are** registered, a tool call can only be detected by inspecting a
+  complete response, so tool calls are resolved the same way as `respond(to:)`
+  and the final answer is delivered as a single completing chunk rather than
+  re-streamed — a deliberate latency/cost tradeoff, not a bug.
+- On hitting `maxIterations`, the stream fails with
+  `AgentError.maxIterationsExceeded(partial:)`, same as `respond(to:)`.
+
 ## Testing
 
-To run the full test suite:
+Most of the test suite runs offline with no credentials or Apple Intelligence
+required:
+
+- `MathExpressionEvaluator`, `MathTool`, `WeatherTool`, and the `Agent`
+  tool-execution/streaming loop are tested against mock providers.
+- `AnthropicProviderTests` and `OpenAIProviderRequestShapeTests` verify actual
+  request shape (headers, body JSON, tool/error round-tripping) against an
+  injected `URLProtocol`-backed mock `URLSession`, without hitting a live API.
+
+To also run the live-API and on-device integration tests:
 
 1. Copy `.env.local.example` to `.env.local` and add your OpenAI API key:
    ```
    OPENAI_API_KEY=your-api-key-here
    ```
+2. Run `swift test` on a Mac with Apple Intelligence enabled — `FoundationProviderTests`
+   exercises the real on-device model and self-skips (`XCTSkip`) if it's unavailable.
+3. OpenAI/Anthropic integration tests self-skip when no API key is present.
 
-2. Run `swift test` - unit tests will run with FoundationProvider.
-
-3. Integration tests with OpenAI will run if API key is present.
-
-Note: OpenAI tests are skipped in CI unless API key is provided as a secret.
+Note: live-API and on-device tests are skipped in CI (no API key secret, no
+Apple Intelligence on hosted runners) — CI still validates that the package
+builds against the real `FoundationModels` SDK.
 
 ### Test Coverage
 
-- ✅ Agent creation and configuration
-- ✅ Tool execution and validation
-- ✅ Provider implementations
+- ✅ Agent creation, tool execution loop, streaming, and max-iterations handling
+- ✅ Provider request-shape correctness (headers, JSON body, tool/error round-tripping) via offline mocks
+- ✅ Provider implementations against live APIs/on-device model (when credentials/Apple Intelligence available)
 - ✅ Error handling scenarios
 - ✅ Context persistence
-- ✅ Math expression evaluation
+- ✅ Math expression evaluation, including malformed-input safety
 - ✅ Input sanitization
 
 ## Requirements
 
-- macOS 15+/iOS 18+
-- Swift 6.0+
+- macOS 26+/iOS 26+ (see `Package.swift`, the source of truth — required for the real `FoundationModels` framework)
+- Swift 6.2+
 - OpenAI API key (for OpenAI provider)
 - Anthropic API key (for Anthropic provider)
-- Apple Intelligence enabled (for Foundation Models, optional)
+- Apple Intelligence enabled (for the Foundation provider; optional if you're only using OpenAI/Anthropic)
 
 ## Security
 
@@ -371,8 +426,9 @@ Note: OpenAI tests are skipped in CI unless API key is provided as a secret.
 - Ensure tool dependencies are available
 
 **FoundationProvider not working**
-- Requires macOS 15+ with Apple Intelligence enabled
+- Requires macOS 26+/iOS 26+ with Apple Intelligence enabled — throws `FoundationModelsError.modelUnavailable` otherwise
 - Check system settings for Apple Intelligence
+- Make sure tools are passed to `FoundationProvider(tools:)` as well as `Agent(tools:)` — the provider only calls tools it has been explicitly given
 
 ### Debug Mode
 

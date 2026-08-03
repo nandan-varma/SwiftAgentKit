@@ -1,71 +1,68 @@
 import XCTest
 @testable import SwiftAgentKit
 import JSONSchema
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
+/// `FoundationProvider` is backed by Apple's real on-device model, so these are
+/// smoke tests (does it respond, does it call the expected tool) rather than
+/// exact-value assertions — a live model's exact wording isn't deterministic,
+/// and CI runners generally won't have Apple Intelligence enabled at all.
 final class FoundationProviderTests: XCTestCase {
-    var provider: FoundationProvider!
-
     override func setUp() async throws {
-        provider = try FoundationProvider()
-    }
-
-    override func tearDown() {
-        provider = nil
+        #if canImport(FoundationModels)
+        guard case .available = SystemLanguageModel.default.availability else {
+            throw XCTSkip("Apple Intelligence is not available on this system")
+        }
+        #else
+        throw XCTSkip("FoundationModels is not available on this platform")
+        #endif
     }
 
     func testGenerateText() async throws {
-        let messages = [TestUtils.createTestMessage(content: "Hello")]
+        let provider = try FoundationProvider()
+        let messages = [TestUtils.createTestMessage(content: "Say hello in one short sentence.")]
         let response = try await provider.generateText(messages: messages, tools: nil)
         XCTAssertFalse(response.content.isEmpty)
         XCTAssertNil(response.toolCalls)
     }
 
     func testGenerateTextWithTools() async throws {
-        let messages = [TestUtils.createTestMessage(content: "Calculate 2+2")]
-        let tools = [TestUtils.createMathTool().descriptor]
-        let response = try await provider.generateText(messages: messages, tools: tools)
+        let weatherTool = TestUtils.createWeatherTool()
+        let provider = try FoundationProvider(tools: [weatherTool])
+        let messages = [TestUtils.createTestMessage(content: "What's the weather in Paris? Use the get_weather tool.")]
+        let response = try await provider.generateText(messages: messages, tools: [weatherTool.descriptor])
+
         XCTAssertFalse(response.content.isEmpty)
-        // FoundationProvider doesn't simulate tool calls, so toolCalls should be nil
+        // Tools the provider calls are executed internally and surfaced via
+        // `executedToolResults`, not `toolCalls` (which stays nil for this provider).
         XCTAssertNil(response.toolCalls)
+        if let executed = response.executedToolResults {
+            XCTAssertFalse(executed.isEmpty)
+            XCTAssertTrue(executed.allSatisfy { $0.content.contains("Weather") })
+        }
     }
 
     func testGenerateObject() async throws {
-        let messages = [TestUtils.createTestMessage(content: "Generate a test object")]
+        let provider = try FoundationProvider()
         let schema = TestUtils.createTestSchema()
-        let object: TestObject = try await provider.generateObject(messages: messages, outputSchema: schema, tools: nil)
-        XCTAssertEqual(object.example, "data")
-        XCTAssertEqual(object.value, 42)
+        let object: TestObject = try await provider.generateObject(
+            messages: [TestUtils.createTestMessage(content: "Return a JSON object with \"example\" set to \"data\" and \"value\" set to 42.")],
+            outputSchema: schema,
+            tools: nil
+        )
+        XCTAssertFalse(object.example.isEmpty)
     }
 
     func testStreamText() async throws {
-        let messages = [TestUtils.createTestMessage(content: "Stream hello")]
+        let provider = try FoundationProvider()
+        let messages = [TestUtils.createTestMessage(content: "Say hello in one short sentence.")]
         let stream = provider.streamText(messages: messages, tools: nil)
-        var chunks: [String] = []
+        var fullText = ""
         for try await chunk in stream {
-            chunks.append(chunk.text)
+            fullText += chunk.text
         }
-        XCTAssertFalse(chunks.isEmpty)
-        XCTAssertTrue(chunks.contains { $0.contains("helpful AI assistant") })
-    }
-
-//    func testStreamObject() async throws {
-//        let messages = [TestUtils.createTestMessage(content: "Stream object")]
-//        let schema = TestUtils.createTestSchema()
-//        let stream: AsyncThrowingStream<TestObject, Error> = provider.streamObject(messages: messages, outputSchema: schema, tools: nil)
-//        var objects: [TestObject] = []
-//        for try await object in stream {
-//            objects.append(object)
-//        }
-//        // Currently stubbed, so should be empty
-//        XCTAssertTrue(objects.isEmpty)
-//    }
-
-    func testFoundationProviderToolCalls() async throws {
-        let messages = [TestUtils.createTestMessage(content: "Calculate 2 + 2")]
-        let tools = [TestUtils.createMathTool().descriptor]
-        let response = try await provider.generateText(messages: messages, tools: tools)
-        XCTAssertFalse(response.content.isEmpty)
-        // FoundationProvider doesn't simulate tool calls
-        XCTAssertNil(response.toolCalls)
+        XCTAssertFalse(fullText.isEmpty)
     }
 }

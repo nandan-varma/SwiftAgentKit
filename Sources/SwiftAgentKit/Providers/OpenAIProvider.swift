@@ -2,13 +2,23 @@ import Foundation
 import SwiftyJSON
 import JSONSchema
 
+/// A `LanguageModelProvider` backed by OpenAI's Chat Completions API.
 public struct OpenAIProvider: LanguageModelProvider {
     private let apiKey: String
     private let model: String
     private let baseURL: URL
     private let timeout: TimeInterval
+    private let session: URLSession
 
-    public init(apiKey: String, model: String = "gpt-4", baseURL: URL? = nil, timeout: TimeInterval = 30.0) throws {
+    /// - Parameters:
+    ///   - apiKey: Your OpenAI API key.
+    ///   - model: The model ID to use. Defaults to a small, current, API-stable
+    ///     model — check OpenAI's model listing for the best fit for your use case.
+    ///   - baseURL: Override for the API base URL (e.g. for a proxy), defaults to `api.openai.com`.
+    ///   - timeout: Per-request timeout.
+    ///   - session: The `URLSession` to issue requests on; override for testing.
+    /// - Throws: `OpenAIError.apiError` if `apiKey` is empty.
+    public init(apiKey: String, model: String = "gpt-4o-mini", baseURL: URL? = nil, timeout: TimeInterval = 30.0, session: URLSession = .shared) throws {
         guard !apiKey.isEmpty else {
             throw OpenAIError.apiError("API key cannot be empty")
         }
@@ -16,6 +26,7 @@ public struct OpenAIProvider: LanguageModelProvider {
         self.model = model
         self.baseURL = baseURL ?? URL(string: "https://api.openai.com")!
         self.timeout = timeout
+        self.session = session
     }
 
     public func generateText(
@@ -91,7 +102,7 @@ public struct OpenAIProvider: LanguageModelProvider {
 
                     request.httpBody = try JSONEncoder().encode(requestBody)
 
-                    let (asyncBytes, _) = try await URLSession.shared.bytes(for: request)
+                    let (asyncBytes, _) = try await session.bytes(for: request)
 
                     for try await line in asyncBytes.lines {
                         if line.starts(with: "data: ") {
@@ -380,13 +391,11 @@ private extension Message {
 
 private extension ToolDescriptor {
     static func toOpenAI(_ descriptor: ToolDescriptor) -> OpenAITool {
-        let encoder = JSONEncoder()
-        let parameters = try? encoder.encode(descriptor.inputSchema)
-        let dict = try? JSONSerialization.jsonObject(with: parameters ?? Data(), options: []) as? [String: Any]
+        let parameters = (try? descriptor.inputSchema.asJSON()) ?? JSON([:])
         return OpenAITool(function: OpenAIFunction(
             name: descriptor.name,
             description: descriptor.description,
-            parameters: JSON(dict ?? [:])
+            parameters: parameters
         ))
     }
 }
@@ -403,11 +412,12 @@ private extension ToolDescriptor {
         }
     }
 
-    private func performRequestWithRetry(request: URLRequest, maxRetries: Int = 3) async throws -> (Data, URLResponse) {
+private extension OpenAIProvider {
+    func performRequestWithRetry(request: URLRequest, maxRetries: Int = 3) async throws -> (Data, URLResponse) {
         var lastError: Error?
         for attempt in 0..<maxRetries {
             do {
-                return try await URLSession.shared.data(for: request)
+                return try await session.data(for: request)
             } catch {
                 lastError = error
                 if attempt < maxRetries - 1 {
@@ -418,3 +428,4 @@ private extension ToolDescriptor {
         }
         throw lastError ?? URLError(.unknown)
     }
+}

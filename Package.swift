@@ -9,7 +9,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/SwiftyJSON/SwiftyJSON.git", from: "5.0.0"),
-        .package(url: "https://github.com/kevinhermawan/swift-json-schema.git", from: "2.0.1")
+        .package(url: "https://github.com/kevinhermawan/swift-json-schema.git", from: "2.0.1"),
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.3.0")
     ],
     targets: [
         .target(name: "SwiftAgentKit", dependencies: ["SwiftyJSON", .product(name: "JSONSchema", package: "swift-json-schema")]),

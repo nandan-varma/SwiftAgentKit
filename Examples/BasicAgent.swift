@@ -3,7 +3,7 @@ import SwiftAgentKit
 // Example usage of SwiftAgentKit
 
 do {
-    let provider = try FoundationProvider()
+    let provider = try FoundationProvider(tools: [WeatherTool(), MathTool()])
     let agent = Agent(
         provider: provider,
         tools: [WeatherTool(), MathTool()],

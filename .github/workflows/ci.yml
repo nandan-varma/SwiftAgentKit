@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build -v
+
+      - name: Test
+        run: swift test -v
+        env:
+          # Optional — OpenAI/Anthropic integration tests self-skip via XCTSkip
+          # when no key is present. FoundationProvider tests self-skip when
+          # Apple Intelligence isn't available, which this runner won't have
+          # regardless of OS version.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

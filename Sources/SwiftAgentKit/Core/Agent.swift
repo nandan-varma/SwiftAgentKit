@@ -38,11 +38,67 @@ public actor Agent {
     ///   - input: The user input to respond to.
     ///   - maxIterations: Maximum number of tool execution iterations to prevent infinite loops.
     /// - Returns: An AgentResponse containing the final content and any tool results.
-    /// - Throws: AgentError.maxIterationsExceeded if the loop exceeds the limit.
+    /// - Throws: AgentError.maxIterationsExceeded, carrying whatever partial
+    ///   content/tool results were produced, if the loop exceeds the limit.
     public func respond(to input: String, maxIterations: Int = 10) async throws -> AgentResponse {
         await context.addMessage(.user(input))
+        return try await resolveTurn(maxIterations: maxIterations)
+    }
 
+    /// Streams a response to the given input.
+    ///
+    /// If the agent has no tools registered, this streams the model's output
+    /// incrementally as it's generated. If tools are registered, a tool call
+    /// can only be detected by inspecting a complete (non-streamed) response, so
+    /// tool calls are resolved exactly as in `respond(to:)` and the final answer
+    /// is yielded as a single completing chunk rather than re-requested as a
+    /// stream — a deliberate latency/cost tradeoff, not a bug.
+    /// - Parameters:
+    ///   - input: The user input to respond to.
+    ///   - maxIterations: Maximum number of tool execution iterations to prevent infinite loops.
+    /// - Note: The stream fails with AgentError.maxIterationsExceeded (carrying
+    ///   whatever partial content/tool results were produced) if the tool loop
+    ///   exceeds the limit.
+    public func streamResponse(to input: String, maxIterations: Int = 10) -> AsyncThrowingStream<LLMStreamChunk, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                await context.addMessage(.user(input))
+
+                guard tools.isEmpty else {
+                    do {
+                        let result = try await resolveTurn(maxIterations: maxIterations)
+                        continuation.yield(LLMStreamChunk(text: result.content, isComplete: true))
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                    return
+                }
+
+                let systemMessage = Message.system(instructions)
+                let messages = [systemMessage] + (await context.messages)
+
+                var fullText = ""
+                do {
+                    for try await chunk in provider.streamText(messages: messages, tools: nil) {
+                        fullText += chunk.text
+                        continuation.yield(chunk)
+                    }
+                    await context.addMessage(.assistant(content: fullText, toolCalls: nil))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Runs the tool-execution loop against the current context (the caller is
+    /// responsible for having already added the user's message) until a final,
+    /// tool-call-free response is reached.
+    private func resolveTurn(maxIterations: Int) async throws -> AgentResponse {
         var toolResults: [ToolResult] = []
+        var lastContent = ""
         var iterations = 0
 
         while iterations < maxIterations {
@@ -54,8 +110,18 @@ public actor Agent {
                 messages: messages,
                 tools: tools.map { $0.descriptor }
             )
-            
+
+            if let executed = response.executedToolResults, !executed.isEmpty {
+                // The provider (e.g. FoundationProvider, which manages tool calling
+                // internally within its own session) already resolved this turn —
+                // nothing left for this loop to execute.
+                toolResults.append(contentsOf: executed)
+                await context.addMessage(.assistant(content: response.content, toolCalls: nil))
+                return AgentResponse(content: response.content, toolResults: toolResults.isEmpty ? nil : toolResults)
+            }
+
             if let toolCalls = response.toolCalls {
+                lastContent = response.content
                 await context.addMessage(.assistant(content: response.content, toolCalls: toolCalls))
                  for call in toolCalls {
                      if let tool = tools.first(where: { $0.name == call.name }) {
@@ -77,7 +143,8 @@ public actor Agent {
                 return AgentResponse(content: response.content, toolResults: toolResults.isEmpty ? nil : toolResults)
             }
         }
-        throw AgentError.maxIterationsExceeded
+        let partial = AgentResponse(content: lastContent, toolResults: toolResults.isEmpty ? nil : toolResults)
+        throw AgentError.maxIterationsExceeded(partial: partial)
     }
     
 

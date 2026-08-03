@@ -44,3 +44,18 @@ The `JSONSchema` type (from the `swift-json-schema` dependency) only exposes `Co
 `Tool` (`Sources/SwiftAgentKit/Core/Tool.swift`) describes both its schema (`inputSchema`/`outputSchema` as `JSONSchema`) and its executable body (`execute(input: [String: JSON])`) — `JSON` is SwiftyJSON's dynamic value type, used throughout instead of `Any` for `Sendable` safety. `MathTool` (`Sources/SwiftAgentKit/Tools/MathTool.swift`) delegates actual expression evaluation to `MathExpressionEvaluator`, a hand-written recursive-descent parser — this exists specifically because `NSExpression` raises an uncatchable Objective-C exception on malformed input, which is unacceptable for something an LLM's output feeds into. `WeatherTool` (`Sources/SwiftAgentKit/Tools/WeatherTool.swift`) calls the real, keyless Open-Meteo API — geocoding the location, then fetching current conditions — and throws `WeatherToolError.locationNotFound` for unresolvable locations.
 
 Every domain gets its own public `Error` enum rather than overloading `ToolError`/a shared catch-all — `AgentError`, `OpenAIError`, `AnthropicError`, `FoundationModelsError`, `WeatherToolError` (all in `Sources/SwiftAgentKit/Core/Errors.swift`) — follow this pattern for anything new.
+
+## Documentation site (`docs/`)
+
+`docs/` is a **separate Next.js + Fumadocs project**, unrelated to the Swift package's build/test tooling above — don't run `swift build`/`swift test` expecting it to touch this, and don't expect SwiftPM commands from within `docs/`. It's the user-facing docs site, deployed to Vercel with root directory `docs`.
+
+```bash
+cd docs
+npm install
+npm run dev     # http://localhost:3000/docs
+npm run build   # production build; also used by Vercel
+```
+
+Content lives in `docs/content/docs/**/*.mdx`; sidebar order/grouping is controlled by the nearest `meta.json`'s `"pages"` array, and a folder with its own `meta.json` + `index.mdx` becomes a collapsible group (see `docs/content/docs/{agent,tools,providers}/`). `docs/lib/source.ts` wires `content/docs` into Fumadocs via `defineDocs`/`loader`.
+
+This is distinct from the DocC catalog at `Sources/SwiftAgentKit/Documentation.docc/` (generated via `swift package generate-documentation`, mentioned above) — two separate documentation systems for two separate audiences (Xcode/DocC readers vs. the public docs site). Keep both in sync when public API changes.

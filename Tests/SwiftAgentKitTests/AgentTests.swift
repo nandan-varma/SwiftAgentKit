@@ -170,9 +170,13 @@ final class AgentTests: XCTestCase {
     func testWeatherToolValidation() async throws {
         let tool = WeatherTool()
 
-        // Valid input
+        // Valid input - hits the real Open-Meteo API (no key required)
         let result = try await tool.execute(input: ["location": "Paris"])
         XCTAssertTrue(result.content.contains("Weather in Paris"))
+        XCTAssertNotNil(result.structuredOutput?["temperatureFahrenheit"].double)
+        XCTAssertNotNil(result.structuredOutput?["humidityPercent"].int)
+        XCTAssertNotNil(result.structuredOutput?["windSpeedKmh"].double)
+        XCTAssertEqual(result.structuredOutput?["resolvedLocation"].string, "Paris")
 
         // Invalid input - empty location
         do {
@@ -191,5 +195,14 @@ final class AgentTests: XCTestCase {
         }
     }
 
+    func testWeatherToolLocationNotFound() async throws {
+        let tool = WeatherTool()
+        do {
+            _ = try await tool.execute(input: ["location": "zzqxwnotarealplace123"])
+            XCTFail("Expected WeatherToolError.locationNotFound")
+        } catch WeatherToolError.locationNotFound {
+            // Expected
+        }
+    }
 
 }

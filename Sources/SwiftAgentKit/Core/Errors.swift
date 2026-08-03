@@ -29,3 +29,8 @@ public enum FoundationModelsError: Error, Sendable {
     case invalidResponseFormat(String)
     case unsupportedPlatform
 }
+
+public enum WeatherToolError: Error, Sendable, Equatable {
+    case locationNotFound(String)
+    case apiError(String)
+}

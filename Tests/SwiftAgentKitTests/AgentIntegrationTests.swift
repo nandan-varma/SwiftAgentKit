@@ -4,16 +4,19 @@ import JSONSchema
 
 final class AgentIntegrationTests: XCTestCase {
     func testAgentWithFoundationProvider() async throws {
-        let provider = try FoundationProvider()
+        let mathTool = TestUtils.createMathTool()
+        let weatherTool = TestUtils.createWeatherTool()
+        // FoundationProvider only calls tools it's been explicitly given, in
+        // addition to the ones passed to Agent(tools:) — see its docs.
+        let provider = try FoundationProvider(tools: [mathTool, weatherTool])
         let agent = Agent(
             provider: provider,
-            tools: [TestUtils.createMathTool(), TestUtils.createWeatherTool()],
+            tools: [mathTool, weatherTool],
             instructions: "You are a helpful assistant."
         )
 
         let response = try await agent.respond(to: "What is 4 + 5?")
         XCTAssertFalse(response.content.isEmpty)
-        // FoundationProvider may not trigger tools, but response should be present
     }
 
     func testAgentWithOpenAIProvider() async throws {
@@ -21,7 +24,7 @@ final class AgentIntegrationTests: XCTestCase {
             throw XCTSkip("OpenAI API key not available")
         }
 
-        let provider = try OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!, model: TestConfig.defaultModel)
+        let provider = try OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!)
         let agent = Agent(
             provider: provider,
             tools: [TestUtils.createMathTool(), TestUtils.createWeatherTool()],
@@ -40,37 +43,66 @@ final class AgentIntegrationTests: XCTestCase {
         }
     }
 
-    func testAgentToolExecution() async throws {
-        let provider = try FoundationProvider()
+    func testAgentWithAnthropicProvider() async throws {
+        guard TestConfig.shared.hasAnthropicKey else {
+            throw XCTSkip("Anthropic API key not available")
+        }
+
+        let provider = try AnthropicProvider(apiKey: TestConfig.shared.anthropicAPIKey!)
         let agent = Agent(
             provider: provider,
-            tools: [TestUtils.createMathTool()],
+            tools: [TestUtils.createMathTool(), TestUtils.createWeatherTool()],
+            instructions: "You are a helpful assistant. Use tools when appropriate."
+        )
+
+        let response = try await agent.respond(to: "Calculate 7 * 8 and tell me the weather in Paris")
+        XCTAssertFalse(response.content.isEmpty)
+
+        if let toolResults = response.toolResults {
+            XCTAssertFalse(toolResults.isEmpty)
+            for result in toolResults {
+                XCTAssertFalse(result.content.isEmpty)
+            }
+        }
+    }
+
+    func testAgentToolExecution() async throws {
+        let mathTool = TestUtils.createMathTool()
+        let provider = try FoundationProvider(tools: [mathTool])
+        let agent = Agent(
+            provider: provider,
+            tools: [mathTool],
             instructions: "Use the calculate tool for math."
         )
 
         let response = try await agent.respond(to: "What is 2 + 2?")
         XCTAssertFalse(response.content.isEmpty)
-        // Even with FoundationProvider, the agent should respond
     }
 
     func testAgentMaxIterations() async throws {
-        let provider = try FoundationProvider()
+        // Deterministic max-iterations behavior (does the loop actually stop
+        // and surface partial results) is covered against a MockProvider in
+        // AgentTests.testAgentMaxIterations. This is a smoke test that the
+        // real on-device model + tool loop doesn't hang or crash within a
+        // small iteration budget.
+        let mathTool = TestUtils.createMathTool()
+        let provider = try FoundationProvider(tools: [mathTool])
         let agent = Agent(
             provider: provider,
-            tools: [TestUtils.createMathTool()],
+            tools: [mathTool],
             instructions: "Always use the calculate tool."
         )
 
-        // FoundationProvider doesn't trigger tool calls, so iterations should not exceed
         let response = try await agent.respond(to: "Calculate something", maxIterations: 5)
         XCTAssertFalse(response.content.isEmpty)
     }
 
     func testAgentWithStructuredOutput() async throws {
-        let provider = try FoundationProvider()
+        let mathTool = TestUtils.createMathTool()
+        let provider = try FoundationProvider(tools: [mathTool])
         let agent = Agent(
             provider: provider,
-            tools: [TestUtils.createMathTool()],
+            tools: [mathTool],
             instructions: "Provide structured responses."
         )
 

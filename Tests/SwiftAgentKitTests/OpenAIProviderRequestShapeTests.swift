@@ -12,12 +12,13 @@ private final class RequestBox: @unchecked Sendable {
     }
 }
 
-/// Offline coverage of OpenAIProvider's request shape (headers, tool serialization),
-/// exercised without a live API key via an injected mock `URLSession`.
 private func openAISuccessBody() -> [String: Any] {
     ["choices": [["message": ["role": "assistant", "content": "ok"]]]]
 }
 
+/// Offline coverage of OpenAIProvider's request shape (headers, tool
+/// serialization), exercised without a live API key via an injected mock
+/// `URLSession`. For live-API coverage see `OpenAIProviderTests`.
 final class OpenAIProviderRequestShapeTests: XCTestCase {
     func testAuthorizationHeader() async throws {
         let box = RequestBox()

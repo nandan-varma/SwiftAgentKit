@@ -7,7 +7,7 @@ final class OpenAIProviderTests: XCTestCase {
 
     override func setUp() async throws {
         if TestConfig.shared.hasOpenAIKey {
-            provider = try OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!, model: TestConfig.defaultModel)
+            provider = try OpenAIProvider(apiKey: TestConfig.shared.openAIAPIKey!)
         }
     }
 
@@ -83,7 +83,7 @@ final class OpenAIProviderTests: XCTestCase {
     }
 
     func testInvalidAPIKey() async throws {
-        let invalidProvider = try OpenAIProvider(apiKey: "invalid", model: TestConfig.defaultModel)
+        let invalidProvider = try OpenAIProvider(apiKey: "invalid")
         let messages = [TestUtils.createTestMessage(content: "Hello")]
         do {
             _ = try await invalidProvider.generateText(messages: messages, tools: nil)
@@ -97,13 +97,19 @@ final class OpenAIProviderTests: XCTestCase {
         guard let provider = provider else {
             throw XCTSkip("OpenAI API key not available")
         }
-        let messages = [TestUtils.createTestMessage(content: "Return invalid JSON")]
+        // OpenAI's json_schema response format constrains the model to valid,
+        // schema-conformant JSON regardless of what the prompt asks for, so a
+        // model can no longer be talked into emitting literally malformed
+        // JSON. This instead exercises a real, reachable mismatch: TestUtils'
+        // schema only marks "example" as required, so the API may legitimately
+        // omit "value" — which TestObject.value (a non-optional Int) can't decode.
+        let messages = [TestUtils.createTestMessage(content: "Return JSON with only the \"example\" field set to \"test\". Do not include a \"value\" field at all.")]
         let schema = TestUtils.createTestSchema()
         do {
             let _: TestObject = try await provider.generateObject(messages: messages, outputSchema: schema, tools: nil)
             XCTFail("Expected decoding error")
         } catch {
-            // Expected - invalid JSON should cause decode error
+            // Expected - TestObject.value is non-optional but the schema allows omitting it
         }
     }
 }

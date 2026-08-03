@@ -60,3 +60,4 @@ print(result.content)
 - ``OpenAIError``
 - ``AnthropicError``
 - ``FoundationModelsError``
+- ``WeatherToolError``

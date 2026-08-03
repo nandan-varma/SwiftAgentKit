@@ -178,7 +178,7 @@ public protocol Tool: Sendable {
 ### Built-in Tools
 
 - **MathTool**: Safe mathematical expression evaluation with injection prevention
-- **WeatherTool**: Mock weather data (replace with real API implementation)
+- **WeatherTool**: Real current weather via the free, keyless [Open-Meteo](https://open-meteo.com) API
 
 ### Error Types
 
@@ -357,26 +357,33 @@ for try await chunk in await agent.streamResponse(to: "Tell me a short story") {
 
 ## Testing
 
-Most of the test suite runs offline with no credentials or Apple Intelligence
-required:
+Most of the test suite requires no OpenAI/Anthropic credentials:
 
-- `MathExpressionEvaluator`, `MathTool`, `WeatherTool`, and the `Agent`
-  tool-execution/streaming loop are tested against mock providers.
-- `AnthropicProviderTests` and `OpenAIProviderRequestShapeTests` verify actual
-  request shape (headers, body JSON, tool/error round-tripping) against an
-  injected `URLProtocol`-backed mock `URLSession`, without hitting a live API.
+- `MathExpressionEvaluator`, `MathTool`, and the `Agent` tool-execution/streaming
+  loop are tested against mock providers.
+- `WeatherTool` is tested against the real, keyless Open-Meteo API (no mocks —
+  it's the actual service the tool calls in production).
+- `AnthropicProviderRequestShapeTests` and `OpenAIProviderRequestShapeTests`
+  verify actual request shape (headers, body JSON, tool/error round-tripping)
+  against an injected `URLProtocol`-backed mock `URLSession`, without hitting a
+  live LLM API.
 
 To also run the live-API and on-device integration tests:
 
-1. Copy `.env.local.example` to `.env.local` and add your OpenAI API key:
+1. Copy `.env.local.example` to `.env.local` and add your API keys:
    ```
-   OPENAI_API_KEY=your-api-key-here
+   OPENAI_API_KEY=your-openai-api-key-here
+   ANTHROPIC_API_KEY=your-anthropic-api-key-here
    ```
 2. Run `swift test` on a Mac with Apple Intelligence enabled — `FoundationProviderTests`
    exercises the real on-device model and self-skips (`XCTSkip`) if it's unavailable.
-3. OpenAI/Anthropic integration tests self-skip when no API key is present.
+3. `OpenAIProviderTests`, `AnthropicProviderTests`, and the corresponding cases
+   in `AgentIntegrationTests` self-skip (`XCTSkip`) when their respective API
+   key is absent — each exercises real text generation, tool calling
+   (including the full multi-turn tool-result round trip), structured output,
+   and streaming against the live API.
 
-Note: live-API and on-device tests are skipped in CI (no API key secret, no
+Note: live-API and on-device tests are skipped in CI (no API key secrets, no
 Apple Intelligence on hosted runners) — CI still validates that the package
 builds against the real `FoundationModels` SDK.
 
@@ -384,7 +391,8 @@ builds against the real `FoundationModels` SDK.
 
 - ✅ Agent creation, tool execution loop, streaming, and max-iterations handling
 - ✅ Provider request-shape correctness (headers, JSON body, tool/error round-tripping) via offline mocks
-- ✅ Provider implementations against live APIs/on-device model (when credentials/Apple Intelligence available)
+- ✅ Provider implementations, and full `Agent` integration, against live APIs/on-device model (when credentials/Apple Intelligence available)
+- ✅ WeatherTool against the real Open-Meteo API (success and location-not-found cases)
 - ✅ Error handling scenarios
 - ✅ Context persistence
 - ✅ Math expression evaluation, including malformed-input safety

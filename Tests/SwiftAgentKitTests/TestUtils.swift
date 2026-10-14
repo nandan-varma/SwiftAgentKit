@@ -1,3 +1,7 @@
+import XCTest
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 import Foundation
 import SwiftAgentKit
 import JSONSchema
@@ -8,6 +12,18 @@ struct TestObject: Codable, Equatable {
 }
 
 struct TestUtils {
+    /// Apple Intelligence isn't available on CI runners (or ineligible devices),
+    /// so tests that hit FoundationProvider can only run where the system model is ready.
+    static func skipUnlessFoundationModelAvailable() throws {
+        #if canImport(FoundationModels)
+        if case .unavailable(let reason) = SystemLanguageModel.default.availability {
+            throw XCTSkip("Foundation model unavailable: \(reason)")
+        }
+        #else
+        throw XCTSkip("FoundationModels not available on this platform")
+        #endif
+    }
+
     static func createTestMessage(content: String, role: MessageRole = .user) -> Message {
         switch role {
         case .user:

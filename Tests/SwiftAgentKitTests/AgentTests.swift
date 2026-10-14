@@ -5,6 +5,7 @@ import SwiftyJSON
 
 final class AgentTests: XCTestCase {
     func testAgentCreation() async throws {
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let provider = try FoundationProvider()
         let agent = Agent(
             provider: provider,
@@ -82,6 +83,7 @@ final class AgentTests: XCTestCase {
     }
 
     func testGenerateObject() async throws {
+        try TestUtils.skipUnlessFoundationModelAvailable()
         // FoundationProvider is backed by a real on-device model, so this is a
         // smoke test (decodes successfully into the target type) rather than an
         // exact-value assertion — the model's wording isn't deterministic.

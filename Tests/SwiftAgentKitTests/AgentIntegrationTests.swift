@@ -1,13 +1,10 @@
 import XCTest
 @testable import SwiftAgentKit
 import JSONSchema
-#if canImport(FoundationModels)
-import FoundationModels
-#endif
 
 final class AgentIntegrationTests: XCTestCase {
     func testAgentWithFoundationProvider() async throws {
-        try skipUnlessFoundationModelAvailable()
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let mathTool = TestUtils.createMathTool()
         let weatherTool = TestUtils.createWeatherTool()
         // FoundationProvider only calls tools it's been explicitly given, in
@@ -71,7 +68,7 @@ final class AgentIntegrationTests: XCTestCase {
     }
 
     func testAgentToolExecution() async throws {
-        try skipUnlessFoundationModelAvailable()
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let mathTool = TestUtils.createMathTool()
         let provider = try FoundationProvider(tools: [mathTool])
         let agent = Agent(
@@ -85,7 +82,7 @@ final class AgentIntegrationTests: XCTestCase {
     }
 
     func testAgentMaxIterations() async throws {
-        try skipUnlessFoundationModelAvailable()
+        try TestUtils.skipUnlessFoundationModelAvailable()
         // Deterministic max-iterations behavior (does the loop actually stop
         // and surface partial results) is covered against a MockProvider in
         // AgentTests.testAgentMaxIterations. This is a smoke test that the
@@ -104,7 +101,7 @@ final class AgentIntegrationTests: XCTestCase {
     }
 
     func testAgentWithStructuredOutput() async throws {
-        try skipUnlessFoundationModelAvailable()
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let mathTool = TestUtils.createMathTool()
         let provider = try FoundationProvider(tools: [mathTool])
         let agent = Agent(
@@ -127,15 +124,4 @@ final class AgentIntegrationTests: XCTestCase {
     // Note: Concurrency test removed due to Swift 6 strict concurrency requirements
     // Agent class would need to be Sendable for concurrent usage
 
-    /// Apple Intelligence isn't available on CI runners (or ineligible devices),
-    /// so FoundationProvider tests can only run where the system model is ready.
-    private func skipUnlessFoundationModelAvailable() throws {
-        #if canImport(FoundationModels)
-        if case .unavailable(let reason) = SystemLanguageModel.default.availability {
-            throw XCTSkip("Foundation model unavailable: \(reason)")
-        }
-        #else
-        throw XCTSkip("FoundationModels not available on this platform")
-        #endif
-    }
 }

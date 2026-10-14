@@ -21,6 +21,7 @@ final class FoundationProviderTests: XCTestCase {
     }
 
     func testGenerateText() async throws {
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let provider = try FoundationProvider()
         let messages = [TestUtils.createTestMessage(content: "Say hello in one short sentence.")]
         let response = try await provider.generateText(messages: messages, tools: nil)
@@ -29,6 +30,7 @@ final class FoundationProviderTests: XCTestCase {
     }
 
     func testGenerateTextWithTools() async throws {
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let weatherTool = TestUtils.createWeatherTool()
         let provider = try FoundationProvider(tools: [weatherTool])
         let messages = [TestUtils.createTestMessage(content: "What's the weather in Paris? Use the get_weather tool.")]
@@ -45,6 +47,7 @@ final class FoundationProviderTests: XCTestCase {
     }
 
     func testGenerateObject() async throws {
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let provider = try FoundationProvider()
         let schema = TestUtils.createTestSchema()
         let object: TestObject = try await provider.generateObject(
@@ -56,6 +59,7 @@ final class FoundationProviderTests: XCTestCase {
     }
 
     func testStreamText() async throws {
+        try TestUtils.skipUnlessFoundationModelAvailable()
         let provider = try FoundationProvider()
         let messages = [TestUtils.createTestMessage(content: "Say hello in one short sentence.")]
         let stream = provider.streamText(messages: messages, tools: nil)
